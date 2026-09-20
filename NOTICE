@@ -1,0 +1,11 @@
+walletd-go
+Copyright 2026 WalletD
+
+This product includes software developed at WalletD (https://walletd.io).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+The type definitions in types.gen.go are generated from the WalletD API
+description published at https://docs.walletd.io/openapi.yaml, a copy of
+which is vendored at api/openapi.yaml. This SDK is a client library: it
+carries no part of the WalletD platform, which is licensed separately.
