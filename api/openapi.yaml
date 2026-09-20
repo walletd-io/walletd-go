@@ -1,0 +1,6040 @@
+openapi: 3.0.3
+info:
+  title: WaaS API
+  description: 'Semi-closed wallet service. Spec v0: health and users.
+
+    Money is always integer minor units. Errors are RFC 7807 problem+json.
+
+    Money-moving POSTs require an Idempotency-Key header.
+
+    '
+  version: 0.8.0
+servers:
+- url: https://apigw.walletd.io
+  description: Replace with your deployment's API host
+security:
+- bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags:
+      - system
+      security: []
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /v1/tenants:
+    post:
+      operationId: createTenant
+      tags:
+      - platform
+      summary: Provision a tenant with its system accounts (platform staff only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+      responses:
+        '201':
+          description: Tenant provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listTenants
+      tags:
+      - platform
+      summary: List tenants (platform staff only)
+      responses:
+        '200':
+          description: Tenants, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tenant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/tenants/{tenantId}/summary:
+    get:
+      operationId: getTenantSummary
+      tags:
+      - platform
+      summary: Per-tenant health snapshot — balances, fee plan, ledger invariants (platform staff only)
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantSummary'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/overview:
+    get:
+      operationId: getPlatformOverview
+      tags:
+      - platform
+      summary: Whole-platform ledger view — every tenant's position and health (global admin only)
+      description: One row per tenant with its user count, 30-day movement, treasury float, outstanding
+        liabilities and whether its books net to zero, plus totals per currency. Amounts are minor units
+        of each tenant's own currency and are never summed across currencies.
+      responses:
+        '200':
+          description: Per-tenant positions and per-currency totals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOverview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/clients:
+    get:
+      operationId: listPlatformClients
+      tags:
+      - platform
+      summary: Ecosystem clients across all tenants, the review queue (global admin only)
+      parameters:
+      - $ref: '#/components/parameters/TenantFilter'
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/CatalogClientStatus'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Clients across all tenants, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/clients/{clientId}/approve:
+    post:
+      operationId: approveClient
+      tags:
+      - platform
+      summary: Let a pending client publish to Explore (platform staff only)
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Client approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/clients/{clientId}/suspend:
+    post:
+      operationId: suspendClient
+      tags:
+      - platform
+      summary: Hide a client's whole catalog from Explore (platform staff only)
+      description: 'Suspension is moderation, not confiscation: the catalog disappears from Explore while
+        settled money stays settled and a payout still works.'
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Client suspended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/transactions:
+    get:
+      operationId: listPlatformTransactions
+      tags:
+      - platform
+      summary: Cross-tenant transaction explorer (global admin only)
+      parameters:
+      - $ref: '#/components/parameters/TenantFilter'
+      - name: type
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Transactions across all tenants, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformTransaction'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/users:
+    get:
+      operationId: listPlatformUsers
+      tags:
+      - platform
+      summary: Wallet users across all tenants (global admin only)
+      parameters:
+      - $ref: '#/components/parameters/TenantFilter'
+      - name: query
+        in: query
+        schema:
+          type: string
+          maxLength: 128
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Users across all tenants, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformUser'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/platform/subscriptions:
+    get:
+      operationId: listPlatformSubscriptions
+      tags:
+      - platform
+      summary: Subscriptions across all tenants (global admin only)
+      parameters:
+      - $ref: '#/components/parameters/TenantFilter'
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/SubscriptionStatus'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Subscriptions across all tenants, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformSubscription'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me:
+    get:
+      operationId: getMe
+      tags:
+      - users
+      summary: Resolve the calling user token to its wallet user
+      responses:
+        '200':
+          description: The caller's own user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/users:
+    get:
+      operationId: listUsers
+      tags:
+      - users
+      summary: Search and page the tenant's users (admin)
+      parameters:
+      - name: query
+        in: query
+        schema:
+          type: string
+          maxLength: 128
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Users, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createUser
+      tags:
+      - users
+      summary: Create or attach a wallet user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "curl -sS -X POST \"$WALLETD_API/v1/users\" \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\"\
+          \ \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"external_id\": \"user-42\", \"kind\"\
+          : \"consumer\", \"handle\": \"ada\"}'\n"
+      - lang: Go
+        label: Go
+        source: "var user walletd.User\nerr := client.Do(ctx, http.MethodPost, \"/v1/users\", map[string]any{\n\
+          \    \"external_id\": \"user-42\",\n    \"kind\":        \"consumer\",\n    \"handle\":    \
+          \  \"ada\",\n}, &user, \"\")\n"
+      - lang: Python
+        label: Python
+        source: "user = client.request(\"POST\", \"/v1/users\", {\n    \"external_id\": \"user-42\",\n\
+          \    \"kind\": \"consumer\",\n    \"handle\": \"ada\",\n})\n"
+      - lang: PHP
+        label: PHP
+        source: "$user = $client->request('POST', '/v1/users', [\n    'external_id' => 'user-42',\n  \
+          \  'kind' => 'consumer',\n    'handle' => 'ada',\n]);\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const user = await client.request(\"POST\", \"/v1/users\", {\n  body: { external_id:\
+          \ \"user-42\", kind: \"consumer\", handle: \"ada\" },\n});\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode user = client.request(\"POST\", \"/v1/users\", Map.of(\n        \"external_id\"\
+          , \"user-42\",\n        \"kind\", \"consumer\",\n        \"handle\", \"ada\"), null);\n"
+  /v1/users/{userId}:
+    get:
+      operationId: getUser
+      tags:
+      - users
+      summary: Fetch a wallet user
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/users/{userId}/balances:
+    get:
+      operationId: getUserBalances
+      tags:
+      - users
+      summary: List a user's balances per account purpose
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserBalance'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/users/{userId}/transactions:
+    get:
+      operationId: listUserTransactions
+      tags:
+      - users
+      summary: A user's ledger history across cash and points
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Entries, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserTransaction'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/transactions:
+    get:
+      operationId: listTransactions
+      tags:
+      - ledger
+      summary: Tenant-wide transaction explorer with resolved legs (admin)
+      parameters:
+      - name: type
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Transactions, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/ledger/summary:
+    get:
+      operationId: getLedgerSummary
+      tags:
+      - ledger
+      summary: Balance totals per owner type and purpose — the float equation view (admin)
+      responses:
+        '200':
+          description: Summary rows plus the tenant's fee plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerSummary'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/ledger/metrics:
+    get:
+      operationId: getLedgerMetrics
+      tags:
+      - ledger
+      summary: Money movement, revenue, exposure and reconciliation for a period (admin)
+      description: The reporting view behind the console dashboard. Balances alone answer "what is the
+        loop holding right now"; this answers "how much money did the loop move, what did it earn on it,
+        what is it exposed to, and do the books still net to zero".
+      parameters:
+      - name: window
+        in: query
+        description: Reporting period ending now. The previous period of the same length is returned alongside
+          for comparison.
+        schema:
+          type: string
+          enum:
+          - 24h
+          - 7d
+          - 30d
+          - 90d
+          default: 30d
+      responses:
+        '200':
+          description: Period metrics for the caller's tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerMetrics'
+        '503':
+          description: '`reporting_timeout`. This view aggregates every ledger entry inside its window,
+            so its cost grows with how much money the loop moved rather than with the size of the window
+            asked for. On a busy loop it can exceed the time budget, and it says so instead of returning
+            an opaque failure or a truncated response. Retry with a narrower window. Expected on high-volume
+            tenants rather than exceptional, so a client should handle it as a normal outcome of asking
+            for a wide window.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/fee_plan:
+    put:
+      operationId: updateFeePlan
+      tags:
+      - ledger
+      summary: Update the tenant fee plan (audited; admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFeePlanRequest'
+      responses:
+        '200':
+          description: Updated fee plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeePlan'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/audit_log:
+    get:
+      operationId: listAuditLog
+      tags:
+      - ledger
+      summary: Tenant audit trail (admin)
+      parameters:
+      - name: action
+        in: query
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        schema:
+          type: integer
+          format: int64
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Audit entries, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/support_access_grants:
+    get:
+      operationId: listSupportAccessGrants
+      tags:
+      - operations
+      summary: List WalletD vendor-support approvals (partner admin only)
+      description: Expired and revoked grants remain in the response as operational and audit evidence.
+        A partner's own support role does not use these grants.
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Support-access grant history, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SupportAccessGrant'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createSupportAccessGrant
+      tags:
+      - operations
+      summary: Approve short-lived WalletD vendor-support access (partner admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportAccessGrantRequest'
+      responses:
+        '201':
+          description: Support access granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessGrant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/support_access_grants/current:
+    get:
+      operationId: getCurrentSupportAccessGrant
+      tags:
+      - operations
+      summary: Get the calling WalletD vendor-support identity's active grant
+      description: This is the only tenant endpoint a WalletD vendor-support identity may call without
+        an active grant. It lets the console present a clear waiting-for-approval state instead of failing
+        into an error page.
+      responses:
+        '200':
+          description: The active grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessGrant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/support_access_grants/{grantId}/revoke:
+    post:
+      operationId: revokeSupportAccessGrant
+      tags:
+      - operations
+      summary: Revoke WalletD vendor-support access immediately (partner admin only)
+      parameters:
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Revoked grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessGrant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/webhook_deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      tags:
+      - webhooks
+      summary: Delivery attempt log (admin)
+      parameters:
+      - name: endpoint_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Delivery attempts, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookDelivery'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/reward_rules/{ruleId}/disable:
+    post:
+      operationId: disableRewardRule
+      tags:
+      - rewards
+      summary: Disable a reward rule; existing grants stand
+      parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Rule disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardRule'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/transfers:
+    post:
+      operationId: createTransfer
+      tags:
+      - transfers
+      summary: P2P transfer between users in the tenant loop
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransferRequest'
+      responses:
+        '201':
+          description: Transfer completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "curl -sS -X POST \"$WALLETD_API/v1/transfers\" \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\"\
+          \ \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: transfer-order-8891\"\
+          \ \\\n  -d '{\"from_user\": \"'$SENDER'\", \"to_alias\": {\"handle\": \"ada\"}, \"amount\":\
+          \ 1500}'\n"
+      - lang: Go
+        label: Go
+        source: "// The key comes from the order, so every retry of this order reuses it.\nvar txn walletd.Transfer\n\
+          err := client.Do(ctx, http.MethodPost, \"/v1/transfers\", map[string]any{\n    \"from_user\"\
+          : senderID,\n    \"to_alias\":  map[string]string{\"handle\": \"ada\"},\n    \"amount\":   \
+          \ 1500,\n}, &txn, \"transfer-\"+orderID)\n"
+      - lang: Python
+        label: Python
+        source: "txn = client.request(\"POST\", \"/v1/transfers\", {\n    \"from_user\": sender_id,\n\
+          \    \"to_alias\": {\"handle\": \"ada\"},\n    \"amount\": 1500,\n}, idempotency_key=f\"transfer-{order_id}\"\
+          )\n"
+      - lang: PHP
+        label: PHP
+        source: "$txn = $client->request('POST', '/v1/transfers', [\n    'from_user' => $senderId,\n \
+          \   'to_alias' => ['handle' => 'ada'],\n    'amount' => 1500,\n], \"transfer-{$orderId}\");\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const txn = await client.request(\"POST\", \"/v1/transfers\", {\n  body: { from_user:\
+          \ senderId, to_alias: { handle: \"ada\" }, amount: 1500 },\n  idempotencyKey: `transfer-${orderId}`,\n\
+          });\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode txn = client.request(\"POST\", \"/v1/transfers\", Map.of(\n        \"from_user\"\
+          , senderId,\n        \"to_alias\", Map.of(\"handle\", \"ada\"),\n        \"amount\", 1500L),\
+          \ \"transfer-\" + orderId);\n"
+  /v1/topup_methods:
+    get:
+      operationId: listTopupMethods
+      tags:
+      - topups
+      summary: The configured top-up gateways, for client UIs picking a rail
+      responses:
+        '200':
+          description: Available methods
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TopupMethod'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/topups:
+    post:
+      operationId: createTopup
+      tags:
+      - topups
+      summary: Start a top-up through a payment gateway
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTopupRequest'
+      responses:
+        '201':
+          description: Top-up intent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topup'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "# Creating an intent does NOT credit the wallet. The balance moves when\n# the processor\
+          \ confirms, over a verified webhook or /refresh.\ncurl -sS -X POST \"$WALLETD_API/v1/topups\"\
+          \ \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\" \\\n  -H \"Content-Type: application/json\"\
+          \ \\\n  -H \"Idempotency-Key: topup-cart-8891\" \\\n  -d '{\"user_id\": \"'$USER_ID'\", \"amount\"\
+          : 5000, \"gateway\": \"stripe\"}'\n"
+      - lang: Go
+        label: Go
+        source: "// amount is minor units: 5000 is $50.00.\nvar topup walletd.Topup\nerr := client.Do(ctx,\
+          \ http.MethodPost, \"/v1/topups\", map[string]any{\n    \"user_id\": userID,\n    \"amount\"\
+          :  5000,\n    \"gateway\": gateway, // from GET /v1/topup_methods, never hard-coded\n}, &topup,\
+          \ \"topup-cart-\"+cartID)\n"
+      - lang: Python
+        label: Python
+        source: "# gateway comes from GET /v1/topup_methods, never hard-coded.\ntopup = client.request(\"\
+          POST\", \"/v1/topups\", {\n    \"user_id\": user_id,\n    \"amount\": 5000,  # $50.00\n    \"\
+          gateway\": gateway,\n}, idempotency_key=f\"topup-cart-{cart_id}\")\n"
+      - lang: PHP
+        label: PHP
+        source: "$topup = $client->request('POST', '/v1/topups', [\n    'user_id' => $userId,\n    'amount'\
+          \ => 5000, // $50.00\n    'gateway' => $gateway,\n], \"topup-cart-{$cartId}\");\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const topup = await client.request(\"POST\", \"/v1/topups\", {\n  body: { user_id: userId,\
+          \ amount: 5000, gateway }, // $50.00\n  idempotencyKey: `topup-cart-${cartId}`,\n});\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode topup = client.request(\"POST\", \"/v1/topups\", Map.of(\n        \"user_id\"\
+          , userId,\n        \"amount\", 5000L, // $50.00\n        \"gateway\", gateway), \"topup-cart-\"\
+          \ + cartId);\n"
+  /v1/topups/{topupId}:
+    get:
+      operationId: getTopup
+      tags:
+      - topups
+      summary: Fetch a top-up intent
+      parameters:
+      - name: topupId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Top-up intent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topup'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/topups/{topupId}/refresh:
+    post:
+      operationId: refreshTopup
+      tags:
+      - topups
+      summary: Ask the gateway for a pending top-up's current outcome
+      description: 'Reconciles one intent on demand: the gateway is asked what it thinks, and a terminal
+        answer is applied through the same verified-confirmation path a webhook uses, so a credit can
+        never happen twice. Use it when a webhook was missed or delayed; a settled intent is returned
+        unchanged.'
+      parameters:
+      - name: topupId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Top-up intent after reconciliation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topup'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "# Idempotent: the answer comes from the processor and lands through the\n# same confirmation\
+          \ path a webhook uses, so this cannot double-credit.\ncurl -sS -X POST \"$WALLETD_API/v1/topups/$TOPUP_ID/refresh\"\
+          \ \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\"\n"
+      - lang: Go
+        label: Go
+        source: 'var topup walletd.Topup
+
+          err := client.Do(ctx, http.MethodPost, "/v1/topups/"+topupID+"/refresh", nil, &topup, "")
+
+          '
+      - lang: Python
+        label: Python
+        source: 'topup = client.request("POST", f"/v1/topups/{topup_id}/refresh")
+
+          '
+      - lang: PHP
+        label: PHP
+        source: '$topup = $client->request(''POST'', "/v1/topups/{$topupId}/refresh");
+
+          '
+      - lang: JavaScript
+        label: JavaScript
+        source: 'const topup = await client.request("POST", `/v1/topups/${topupId}/refresh`);
+
+          '
+      - lang: Java
+        label: Java
+        source: 'JsonNode topup = client.request("POST", "/v1/topups/" + topupId + "/refresh", null, null);
+
+          '
+  /v1/merchants:
+    post:
+      operationId: createMerchant
+      tags:
+      - merchants
+      summary: Register a merchant with its settlement account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMerchantRequest'
+      responses:
+        '201':
+          description: Merchant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Merchant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/merchants/{merchantId}:
+    get:
+      operationId: getMerchant
+      tags:
+      - merchants
+      summary: Fetch a merchant
+      parameters:
+      - $ref: '#/components/parameters/MerchantId'
+      responses:
+        '200':
+          description: Merchant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Merchant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/merchants/{merchantId}/statement:
+    get:
+      operationId: getMerchantStatement
+      tags:
+      - merchants
+      summary: List settlement account entries
+      parameters:
+      - $ref: '#/components/parameters/MerchantId'
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Statement entries, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatementEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/payments:
+    post:
+      operationId: createPayment
+      tags:
+      - payments
+      summary: Pay a merchant, instantly or as an authorization hold
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment created (captured for instant mode, requires_capture for authorize)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "# mode \"instant\" settles now; \"authorize\" holds the money for a later capture.\n\
+          curl -sS -X POST \"$WALLETD_API/v1/payments\" \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\"\
+          \ \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: payment-order-4471\"\
+          \ \\\n  -d '{\"payer_user_id\": \"'$USER_ID'\", \"merchant_id\": \"'$MERCHANT_ID'\",\n     \
+          \  \"amount\": 1840, \"mode\": \"instant\"}'\n"
+      - lang: Go
+        label: Go
+        source: "var payment walletd.Payment\nerr := client.Do(ctx, http.MethodPost, \"/v1/payments\"\
+          , map[string]any{\n    \"payer_user_id\": payerID,\n    \"merchant_id\":   merchantID,\n   \
+          \ \"amount\":        1840,\n    \"mode\":          \"instant\",\n}, &payment, \"payment-\"+orderID)\n"
+      - lang: Python
+        label: Python
+        source: "payment = client.request(\"POST\", \"/v1/payments\", {\n    \"payer_user_id\": payer_id,\n\
+          \    \"merchant_id\": merchant_id,\n    \"amount\": 1840,\n    \"mode\": \"instant\",\n}, idempotency_key=f\"\
+          payment-{order_id}\")\n"
+      - lang: PHP
+        label: PHP
+        source: "$payment = $client->request('POST', '/v1/payments', [\n    'payer_user_id' => $payerId,\n\
+          \    'merchant_id' => $merchantId,\n    'amount' => 1840,\n    'mode' => 'instant',\n], \"payment-{$orderId}\"\
+          );\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const payment = await client.request(\"POST\", \"/v1/payments\", {\n  body: { payer_user_id:\
+          \ payerId, merchant_id: merchantId, amount: 1840, mode: \"instant\" },\n  idempotencyKey: `payment-${orderId}`,\n\
+          });\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode payment = client.request(\"POST\", \"/v1/payments\", Map.of(\n        \"payer_user_id\"\
+          , payerId,\n        \"merchant_id\", merchantId,\n        \"amount\", 1840L,\n        \"mode\"\
+          , \"instant\"), \"payment-\" + orderId);\n"
+  /v1/payments/{paymentId}:
+    get:
+      operationId: getPayment
+      tags:
+      - payments
+      summary: Fetch a payment
+      parameters:
+      - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/payments/{paymentId}/capture:
+    post:
+      operationId: capturePayment
+      tags:
+      - payments
+      summary: Capture an authorized payment, optionally partially
+      parameters:
+      - $ref: '#/components/parameters/PaymentId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: Defaults to the full authorized amount
+      responses:
+        '200':
+          description: Payment captured; any hold remainder is released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "# Capturing less than was authorized releases the difference.\ncurl -sS -X POST \"$WALLETD_API/v1/payments/$PAYMENT_ID/capture\"\
+          \ \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\" \\\n  -H \"Content-Type: application/json\"\
+          \ \\\n  -H \"Idempotency-Key: capture-booking-771\" \\\n  -d '{\"amount\": 58000}'\n"
+      - lang: Go
+        label: Go
+        source: "// Omit amount to capture the full authorized amount.\nvar payment walletd.Payment\n\
+          err := client.Do(ctx, http.MethodPost, \"/v1/payments/\"+paymentID+\"/capture\",\n    map[string]any{\"\
+          amount\": 58000}, &payment, \"capture-\"+orderID)\n"
+      - lang: Python
+        label: Python
+        source: "payment = client.request(\"POST\", f\"/v1/payments/{payment_id}/capture\",\n        \
+          \                 {\"amount\": 58000}, idempotency_key=f\"capture-{order_id}\")\n"
+      - lang: PHP
+        label: PHP
+        source: "$payment = $client->request('POST', \"/v1/payments/{$paymentId}/capture\",\n    ['amount'\
+          \ => 58000], \"capture-{$orderId}\");\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const payment = await client.request(\"POST\", `/v1/payments/${paymentId}/capture`, {\n\
+          \  body: { amount: 58000 },\n  idempotencyKey: `capture-${orderId}`,\n});\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode payment = client.request(\"POST\", \"/v1/payments/\" + paymentId + \"/capture\"\
+          ,\n        Map.of(\"amount\", 58000L), \"capture-\" + orderId);\n"
+  /v1/payments/{paymentId}/void:
+    post:
+      operationId: voidPayment
+      tags:
+      - payments
+      summary: Release an authorized payment without capturing
+      parameters:
+      - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Payment voided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/refunds:
+    post:
+      operationId: createRefund
+      tags:
+      - payments
+      summary: Refund a captured payment back to the payer's wallet
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRefundRequest'
+      responses:
+        '201':
+          description: Refund completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "# Cumulative refunds can never exceed what was captured.\ncurl -sS -X POST \"$WALLETD_API/v1/refunds\"\
+          \ \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\" \\\n  -H \"Content-Type: application/json\"\
+          \ \\\n  -H \"Idempotency-Key: refund-order-4471-1\" \\\n  -d '{\"payment_id\": \"'$PAYMENT_ID'\"\
+          , \"amount\": 950, \"reason\": \"wrong item\"}'\n"
+      - lang: Go
+        label: Go
+        source: "var refund walletd.Refund\nerr := client.Do(ctx, http.MethodPost, \"/v1/refunds\", map[string]any{\n\
+          \    \"payment_id\": paymentID,\n    \"amount\":     950,\n    \"reason\":     \"wrong item\"\
+          ,\n}, &refund, \"refund-\"+orderID+\"-1\")\n"
+      - lang: Python
+        label: Python
+        source: "refund = client.request(\"POST\", \"/v1/refunds\", {\n    \"payment_id\": payment_id,\n\
+          \    \"amount\": 950,\n    \"reason\": \"wrong item\",\n}, idempotency_key=f\"refund-{order_id}-1\"\
+          )\n"
+      - lang: PHP
+        label: PHP
+        source: "$refund = $client->request('POST', '/v1/refunds', [\n    'payment_id' => $paymentId,\n\
+          \    'amount' => 950,\n    'reason' => 'wrong item',\n], \"refund-{$orderId}-1\");\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const refund = await client.request(\"POST\", \"/v1/refunds\", {\n  body: { payment_id:\
+          \ paymentId, amount: 950, reason: \"wrong item\" },\n  idempotencyKey: `refund-${orderId}-1`,\n\
+          });\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode refund = client.request(\"POST\", \"/v1/refunds\", Map.of(\n        \"payment_id\"\
+          , paymentId,\n        \"amount\", 950L,\n        \"reason\", \"wrong item\"), \"refund-\" +\
+          \ orderId + \"-1\");\n"
+  /v1/reward_rules:
+    post:
+      operationId: createRewardRule
+      tags:
+      - rewards
+      summary: Create a reward rule (cashback, accrual, or conversion)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRewardRuleRequest'
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardRule'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listRewardRules
+      tags:
+      - rewards
+      summary: List reward rules
+      responses:
+        '200':
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RewardRule'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/rewards/convert:
+    post:
+      operationId: convertPoints
+      tags:
+      - rewards
+      summary: Convert points to wallet cash at the tenant rate
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - user_id
+              - points
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                points:
+                  type: integer
+                  format: int64
+                  minimum: 1
+      responses:
+        '201':
+          description: Conversion completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversion'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "curl -sS -X POST \"$WALLETD_API/v1/rewards/convert\" \\\n  -H \"Authorization: Bearer\
+          \ $WALLETD_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key:\
+          \ convert-user-42-1\" \\\n  -d '{\"user_id\": \"'$USER_ID'\", \"points\": 650}'\n"
+      - lang: Go
+        label: Go
+        source: "var txn walletd.Transaction\nerr := client.Do(ctx, http.MethodPost, \"/v1/rewards/convert\"\
+          ,\n    map[string]any{\"user_id\": userID, \"points\": 650}, &txn, key)\n"
+      - lang: Python
+        label: Python
+        source: "txn = client.request(\"POST\", \"/v1/rewards/convert\",\n                     {\"user_id\"\
+          : user_id, \"points\": 650}, idempotency_key=key)\n"
+      - lang: PHP
+        label: PHP
+        source: "$txn = $client->request('POST', '/v1/rewards/convert',\n    ['user_id' => $userId, 'points'\
+          \ => 650], $key);\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const txn = await client.request(\"POST\", \"/v1/rewards/convert\", {\n  body: { user_id:\
+          \ userId, points: 650 },\n  idempotencyKey: key,\n});\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode txn = client.request(\"POST\", \"/v1/rewards/convert\",\n        Map.of(\"user_id\"\
+          , userId, \"points\", 650L), key);\n"
+  /v1/users/{userId}/rewards:
+    get:
+      operationId: listUserRewards
+      tags:
+      - rewards
+      summary: List a user's reward grants, newest first
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RewardGrant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/subscriptions:
+    get:
+      operationId: listSubscriptions
+      tags:
+      - subscriptions
+      summary: Page the tenant's subscriptions (admin)
+      parameters:
+      - name: user_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/SubscriptionStatus'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Subscriptions, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createSubscription
+      tags:
+      - subscriptions
+      summary: Create a recurring charge mandate
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+      responses:
+        '201':
+          description: Subscription created; the first charge lands on the scheduler's next sweep
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "curl -sS -X POST \"$WALLETD_API/v1/subscriptions\" \\\n  -H \"Authorization: Bearer $WALLETD_API_KEY\"\
+          \ \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: sub-user-42-foodpass\"\
+          \ \\\n  -d '{\"user_id\": \"'$USER_ID'\", \"merchant_id\": \"'$MERCHANT_ID'\",\n       \"plan_name\"\
+          : \"FoodPass\", \"amount\": 999, \"interval\": \"monthly\"}'\n"
+      - lang: Go
+        label: Go
+        source: "var sub walletd.Subscription\nerr := client.Do(ctx, http.MethodPost, \"/v1/subscriptions\"\
+          , map[string]any{\n    \"user_id\":     userID,\n    \"merchant_id\": merchantID,\n    \"plan_name\"\
+          :   \"FoodPass\",\n    \"amount\":      999,\n    \"interval\":    \"monthly\",\n}, &sub, \"\
+          sub-\"+userID+\"-foodpass\")\n"
+      - lang: Python
+        label: Python
+        source: "sub = client.request(\"POST\", \"/v1/subscriptions\", {\n    \"user_id\": user_id,\n\
+          \    \"merchant_id\": merchant_id,\n    \"plan_name\": \"FoodPass\",\n    \"amount\": 999,\n\
+          \    \"interval\": \"monthly\",\n}, idempotency_key=f\"sub-{user_id}-foodpass\")\n"
+      - lang: PHP
+        label: PHP
+        source: "$sub = $client->request('POST', '/v1/subscriptions', [\n    'user_id' => $userId,\n \
+          \   'merchant_id' => $merchantId,\n    'plan_name' => 'FoodPass',\n    'amount' => 999,\n  \
+          \  'interval' => 'monthly',\n], \"sub-{$userId}-foodpass\");\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const sub = await client.request(\"POST\", \"/v1/subscriptions\", {\n  body: { user_id:\
+          \ userId, merchant_id: merchantId, plan_name: \"FoodPass\", amount: 999, interval: \"monthly\"\
+          \ },\n  idempotencyKey: `sub-${userId}-foodpass`,\n});\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode sub = client.request(\"POST\", \"/v1/subscriptions\", Map.of(\n        \"user_id\"\
+          , userId,\n        \"merchant_id\", merchantId,\n        \"plan_name\", \"FoodPass\",\n    \
+          \    \"amount\", 999L,\n        \"interval\", \"monthly\"), \"sub-\" + userId + \"-foodpass\"\
+          );\n"
+  /v1/subscriptions/{subscriptionId}:
+    get:
+      operationId: getSubscription
+      tags:
+      - subscriptions
+      summary: Fetch a subscription
+      parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/subscriptions/{subscriptionId}/pause:
+    post:
+      operationId: pauseSubscription
+      tags:
+      - subscriptions
+      summary: Pause charging
+      parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Subscription paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/subscriptions/{subscriptionId}/resume:
+    post:
+      operationId: resumeSubscription
+      tags:
+      - subscriptions
+      summary: Resume a paused subscription; the period re-anchors at the resume time
+      parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Subscription active again
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/subscriptions/{subscriptionId}/cancel:
+    post:
+      operationId: cancelSubscription
+      tags:
+      - subscriptions
+      summary: Cancel a subscription permanently
+      parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Subscription canceled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/users/{userId}/credit_limit:
+    post:
+      operationId: setUserCreditLimit
+      tags:
+      - users
+      summary: Set a business user's credit line (audited; API keys only)
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetCreditLimitRequest'
+      responses:
+        '200':
+          description: Credit limit updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditLine'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/webhook_endpoints:
+    post:
+      operationId: createWebhookEndpoint
+      tags:
+      - webhooks
+      summary: Register a webhook endpoint; the signing secret is returned once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookEndpointRequest'
+      responses:
+        '201':
+          description: Endpoint registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookEndpoint'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listWebhookEndpoints
+      tags:
+      - webhooks
+      summary: List webhook endpoints
+      responses:
+        '200':
+          description: Endpoints
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookEndpoint'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/webhook_events:
+    get:
+      operationId: listWebhookEvents
+      tags:
+      - webhooks
+      summary: List emitted events
+      parameters:
+      - name: type
+        in: query
+        schema:
+          type: string
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookEvent'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/webhook_events/{eventId}/redeliver:
+    post:
+      operationId: redeliverWebhookEvent
+      tags:
+      - webhooks
+      summary: Re-enqueue an event to all matching endpoints
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '202':
+          description: Redelivery enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - enqueued
+                properties:
+                  enqueued:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients:
+    post:
+      operationId: onboardClient
+      tags:
+      - catalog
+      summary: Self-serve ecosystem client onboarding (org + merchant + profile)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardClientRequest'
+      responses:
+        '200':
+          description: Client already existed for this founder and name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        '201':
+          description: Client onboarded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listClients
+      tags:
+      - catalog
+      summary: The clients the caller may manage
+      description: A consumer gets the clients its organization memberships cover, which is how a founder
+        finds their own client after onboarding. Staff holding clients:manage get the loop's clients instead,
+        optionally by status.
+      parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/CatalogClientStatus'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Clients, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/sales:
+    get:
+      operationId: listClientSales
+      tags:
+      - catalog
+      summary: What this client sold, and what it kept
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Totals plus the sales themselves, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientSales'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}:
+    get:
+      operationId: getClient
+      tags:
+      - catalog
+      summary: Fetch a client (members and loop staff)
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/profile:
+    put:
+      operationId: updateClientProfile
+      tags:
+      - catalog
+      summary: Update the client's public identity
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientProfileRequest'
+      responses:
+        '200':
+          description: Updated client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings:
+    get:
+      operationId: listClientOfferings
+      tags:
+      - catalog
+      summary: The client's own offerings, one page at a time
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - draft
+          - published
+          - archived
+      - name: category_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: q
+        in: query
+        description: Matches title, SKU or barcode
+        schema:
+          type: string
+          maxLength: 128
+      - name: low_stock
+        in: query
+        description: Only items with a variant at or under its low-stock threshold
+        schema:
+          type: boolean
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Offerings, newest first, with their live variants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfferingPage'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createOffering
+      tags:
+      - catalog
+      summary: Create a draft offering
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOfferingRequest'
+      responses:
+        '201':
+          description: Draft offering
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offering'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}:
+    get:
+      operationId: getClientOffering
+      tags:
+      - catalog
+      summary: One of the client's own offerings, any status, with its live variants
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      responses:
+        '200':
+          description: Offering
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offering'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: updateOffering
+      tags:
+      - catalog
+      summary: Edit an offering
+      description: A draft may change anything. A published item may be repriced, and the change is recorded
+        in its price history. A published plan may only change how it presents itself, because subscribers
+        are already being charged its price. An archived offering cannot be edited at all.
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOfferingRequest'
+      responses:
+        '200':
+          description: Offering updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offering'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}/publish:
+    post:
+      operationId: publishOffering
+      tags:
+      - catalog
+      summary: Publish a draft offering to discovery
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      responses:
+        '200':
+          description: Published offering
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offering'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}/archive:
+    post:
+      operationId: archiveOffering
+      tags:
+      - catalog
+      summary: Archive an offering (draft or published)
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      responses:
+        '200':
+          description: Archived offering
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offering'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}/variants:
+    post:
+      operationId: addVariant
+      tags:
+      - catalog
+      summary: Add a variant to an item
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VariantInput'
+      responses:
+        '201':
+          description: Variant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}/variants/{variantId}:
+    put:
+      operationId: updateVariant
+      tags:
+      - catalog
+      summary: Edit a variant; a price change is recorded in history
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      - $ref: '#/components/parameters/VariantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VariantInput'
+      responses:
+        '200':
+          description: Variant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}/variants/{variantId}/archive:
+    post:
+      operationId: archiveVariant
+      tags:
+      - catalog
+      summary: Retire a variant (a product keeps at least one)
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      - $ref: '#/components/parameters/VariantId'
+      responses:
+        '200':
+          description: Archived variant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variant'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/offerings/{offeringId}/variants/{variantId}/stock:
+    post:
+      operationId: adjustStock
+      tags:
+      - catalog
+      summary: Change a tracked variant's on-hand count, with a reason
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OfferingId'
+      - $ref: '#/components/parameters/VariantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockAdjustmentRequest'
+      responses:
+        '200':
+          description: The variant after the change and the movement logged for it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockAdjustmentResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/inventory/movements:
+    get:
+      operationId: listInventoryMovements
+      tags:
+      - catalog
+      summary: The shop's stock log, newest first
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - name: variant_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Movements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InventoryMovement'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/pricing:
+    get:
+      operationId: getClientPricing
+      tags:
+      - catalog
+      summary: The shop's default markup and rounding
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Pricing defaults
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pricing'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: setClientPricing
+      tags:
+      - catalog
+      summary: Set the shop's default markup and rounding, repricing cost_plus variants
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pricing'
+      responses:
+        '200':
+          description: Pricing defaults, with how many variants were repriced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pricing'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/price_history:
+    get:
+      operationId: listPriceHistory
+      tags:
+      - catalog
+      summary: Every price change in the shop, newest first
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - name: offering_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Price changes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PriceChange'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/categories:
+    get:
+      operationId: listCategories
+      tags:
+      - catalog
+      summary: The shop's category tree, parents first
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createCategory
+      tags:
+      - catalog
+      summary: Create a category
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryInput'
+      responses:
+        '201':
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/categories/{categoryId}:
+    put:
+      operationId: updateCategory
+      tags:
+      - catalog
+      summary: Rename or move a category
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/CategoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryInput'
+      responses:
+        '200':
+          description: Category updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteCategory
+      tags:
+      - catalog
+      summary: Delete an unused category
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '204':
+          description: Deleted
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/orders:
+    get:
+      operationId: listClientOrders
+      tags:
+      - orders
+      summary: The merchant's order book, newest first
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - open
+          - paying
+          - paid
+          - canceled
+          - expired
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/orders/{orderId}:
+    get:
+      operationId: getClientOrder
+      tags:
+      - orders
+      summary: One of the merchant's orders
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/orders/{orderId}/cancel:
+    post:
+      operationId: cancelClientOrder
+      tags:
+      - orders
+      summary: Cancel an open order and release its stock
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Canceled order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/orders/{orderId}/restock:
+    post:
+      operationId: restockOrder
+      tags:
+      - orders
+      summary: Put a paid order's units back on the shelf (after a refund), once
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order with restocked_at set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/imports:
+    get:
+      operationId: listCatalogImports
+      tags:
+      - catalog
+      summary: The shop's imports, newest first
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Imports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogImport'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: startCatalogImport
+      tags:
+      - catalog
+      summary: Upload a CSV or XLSX (and optionally a ZIP of images) for preview
+      description: Nothing lands until the import is committed. The file is validated in full in the background;
+        poll the import until its status is ready, review the rows, then commit. Rows match existing products
+        by SKU. Download the template for the column list.
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The .csv or .xlsx, at most 10 MB
+                images:
+                  type: string
+                  format: binary
+                  description: A .zip of the pictures the image column names, at most 100 MB
+      responses:
+        '202':
+          description: Import accepted for validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogImport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/imports/{importId}:
+    get:
+      operationId: getCatalogImport
+      tags:
+      - catalog
+      summary: One import and its counts
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ImportId'
+      responses:
+        '200':
+          description: Import
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogImport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/imports/{importId}/rows:
+    get:
+      operationId: listCatalogImportRows
+      tags:
+      - catalog
+      summary: The preview, row by row
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ImportId'
+      - name: action
+        in: query
+        schema:
+          type: string
+          enum:
+          - create
+          - update
+          - error
+      - name: after
+        in: query
+        description: Last seen row_no from the previous page
+        schema:
+          type: integer
+          minimum: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+      responses:
+        '200':
+          description: Rows in spreadsheet order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogImportRow'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/imports/{importId}/commit:
+    post:
+      operationId: commitCatalogImport
+      tags:
+      - catalog
+      summary: Apply a ready import in the background
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ImportId'
+      responses:
+        '202':
+          description: Import is committing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogImport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/imports/{importId}/cancel:
+    post:
+      operationId: cancelCatalogImport
+      tags:
+      - catalog
+      summary: Drop an import that has not been committed
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/ImportId'
+      responses:
+        '200':
+          description: Canceled import
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogImport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/api_keys:
+    get:
+      operationId: listMerchantApiKeys
+      tags:
+      - catalog
+      summary: The merchant's API keys, without secrets
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Keys, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MerchantApiKey'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: issueMerchantApiKey
+      tags:
+      - catalog
+      summary: Issue an API key that acts as this merchant
+      description: Only a signed-in member of the merchant's organization may issue a key; a key cannot
+        mint more keys. The token is returned once.
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueMerchantApiKeyRequest'
+      responses:
+        '201':
+          description: The key and its one-time token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssuedMerchantApiKey'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/api_keys/{keyId}:
+    delete:
+      operationId: revokeMerchantApiKey
+      tags:
+      - catalog
+      summary: Revoke one of the merchant's keys
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/KeyId'
+      responses:
+        '204':
+          description: Revoked
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/webhook_endpoints:
+    get:
+      operationId: listMerchantWebhookEndpoints
+      tags:
+      - catalog
+      summary: The merchant's own webhook endpoints
+      description: 'A merchant endpoint receives the events that belong to this merchant: product.*, order.*,
+        inventory.* and import.*. Tenant-wide events never reach it. A merchant-bound API key may manage
+        these.'
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Endpoints, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookEndpoint'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createMerchantWebhookEndpoint
+      tags:
+      - catalog
+      summary: Register a webhook endpoint for this merchant; the signing secret is returned once
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookEndpointRequest'
+      responses:
+        '201':
+          description: Endpoint registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookEndpoint'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/webhook_endpoints/{endpointId}:
+    delete:
+      operationId: disableMerchantWebhookEndpoint
+      tags:
+      - catalog
+      summary: Stop deliveries to one of the merchant's endpoints
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/EndpointId'
+      responses:
+        '204':
+          description: Disabled
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/webhook_deliveries:
+    get:
+      operationId: listMerchantWebhookDeliveries
+      tags:
+      - catalog
+      summary: Delivery attempts to the merchant's endpoints
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - name: endpoint_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Delivery attempts, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookDelivery'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/marketing:
+    get:
+      operationId: getClientMarketing
+      tags:
+      - catalog
+      summary: Settlement and marketing balances
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Balances
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketingView'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/marketing/fund:
+    post:
+      operationId: fundClientMarketing
+      tags:
+      - catalog
+      summary: Move the client's settlement money into its marketing account
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FundMarketingRequest'
+      responses:
+        '201':
+          description: Funding posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FundMarketingResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/commission:
+    put:
+      operationId: setClientCommission
+      tags:
+      - catalog
+      summary: Set a merchant's per-transaction commission rate (tenant admin)
+      description: The tenant's negotiated marketplace commission for this one merchant, applied to every
+        catalog sale it makes. It overrides the tenant's default commission rate; a per-offering rate
+        still beats it. Requires fees:manage, the same authority as the tenant-wide fee plan; a merchant
+        cannot set its own commission.
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetClientCommissionRequest'
+      responses:
+        '200':
+          description: Commission set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/reward_rules:
+    get:
+      operationId: listClientRewardRules
+      tags:
+      - catalog
+      summary: List this merchant's own cashback and loyalty rules
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: The merchant's rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RewardRule'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createClientRewardRule
+      tags:
+      - catalog
+      summary: Set a cashback or loyalty rule for this merchant, common or per-product
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRewardRuleRequest'
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardRule'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/reward_rules/{ruleId}/disable:
+    post:
+      operationId: disableClientRewardRule
+      tags:
+      - catalog
+      summary: Turn off one of this merchant's own rules
+      description: Retires a rule the merchant owns, freeing its slot so a new rate can be set. Grants
+        already made stand. A rule the merchant does not own is not found.
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - name: ruleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Rule disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardRule'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/tier_limits:
+    get:
+      operationId: listTierLimits
+      tags:
+      - limits
+      summary: The tenant's configured tier caps (admin)
+      responses:
+        '200':
+          description: Tier limits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TierLimits'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: setTierLimits
+      tags:
+      - limits
+      summary: Upsert one tier's caps (audited; admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetTierLimitsRequest'
+      responses:
+        '200':
+          description: Stored tier limits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TierLimits'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/users/{userId}/tier:
+    post:
+      operationId: setUserTier
+      tags:
+      - limits
+      summary: Assign a user's limit tier (audited; admin)
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - tier
+              properties:
+                tier:
+                  type: string
+                  minLength: 1
+                  maxLength: 32
+      responses:
+        '200':
+          description: Tier assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - user_id
+                - tier
+                - previous
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  tier:
+                    type: string
+                  previous:
+                    type: string
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/clients/{clientId}/payouts:
+    get:
+      operationId: listClientPayouts
+      tags:
+      - payouts
+      summary: The client's payout statement, newest first
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Payouts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Payout'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: runClientPayout
+      tags:
+      - payouts
+      summary: Pay out settlement money (books first, transfer follows)
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: Omit for the full settlement balance
+      responses:
+        '201':
+          description: Payout posted (and transferred when a rail is attached)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payout'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-codeSamples:
+      - lang: curl
+        label: curl
+        source: "# An empty body pays out the full settlement balance. Key on the payout\n# PERIOD, not\
+          \ the moment, so a retry after a timeout pays once.\ncurl -sS -X POST \"$WALLETD_API/v1/clients/$CLIENT_ID/payouts\"\
+          \ \\\n  -H \"Authorization: Bearer $TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n\
+          \  -H \"Idempotency-Key: payout-2026-08-11-$CLIENT_ID\" \\\n  -d '{}'\n"
+      - lang: Go
+        label: Go
+        source: "var payout walletd.Payout\nkey := \"payout-\" + period + \"-\" + clientID\nerr := client.Do(ctx,\
+          \ http.MethodPost, \"/v1/clients/\"+clientID+\"/payouts\",\n    map[string]any{}, &payout, key)\n"
+      - lang: Python
+        label: Python
+        source: "payout = client.request(\"POST\", f\"/v1/clients/{client_id}/payouts\", {},\n       \
+          \                 idempotency_key=f\"payout-{period}-{client_id}\")\n"
+      - lang: PHP
+        label: PHP
+        source: "$payout = $client->request('POST', \"/v1/clients/{$clientId}/payouts\", [],\n    \"payout-{$period}-{$clientId}\"\
+          );\n"
+      - lang: JavaScript
+        label: JavaScript
+        source: "const payout = await client.request(\"POST\", `/v1/clients/${clientId}/payouts`, {\n\
+          \  body: {},\n  idempotencyKey: `payout-${period}-${clientId}`,\n});\n"
+      - lang: Java
+        label: Java
+        source: "JsonNode payout = client.request(\"POST\", \"/v1/clients/\" + clientId + \"/payouts\"\
+          ,\n        Map.of(), \"payout-\" + period + \"-\" + clientId);\n"
+  /v1/orders:
+    get:
+      operationId: listOrders
+      tags:
+      - orders
+      summary: The calling shopper's orders, newest first
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createOrder
+      tags:
+      - orders
+      summary: Reserve a cart from one merchant at catalog prices
+      description: Stock is reserved for each line (unless the variant does not track inventory or allows
+        backorder) until the order is paid, canceled or expires. 422 insufficient_stock names the line
+        that cannot be promised.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Open order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/orders/{orderId}:
+    get:
+      operationId: getOrder
+      tags:
+      - orders
+      summary: One of the shopper's orders
+      parameters:
+      - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/orders/{orderId}/pay:
+    post:
+      operationId: payOrder
+      tags:
+      - orders
+      summary: Pay an open order with one instant payment
+      description: 'Idempotent by order: calling it again returns the same payment. A payment refusal
+        (insufficient funds, limits) leaves the order open.'
+      parameters:
+      - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: The paid order and its payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderPayment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      tags:
+      - orders
+      summary: Cancel an open order and release its stock
+      parameters:
+      - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Canceled order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/explore/clients:
+    get:
+      operationId: exploreClients
+      tags:
+      - explore
+      summary: Browse and search the client directory
+      parameters:
+      - name: q
+        in: query
+        schema:
+          type: string
+          maxLength: 128
+      - name: category
+        in: query
+        schema:
+          type: string
+          maxLength: 64
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Active clients, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogClient'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/explore/clients/{clientId}:
+    get:
+      operationId: exploreClient
+      tags:
+      - explore
+      summary: A client's public profile with its published offerings
+      parameters:
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Client detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExploreClientDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/explore/offerings/{offeringId}:
+    get:
+      operationId: exploreOffering
+      tags:
+      - explore
+      summary: A published offering with its client
+      parameters:
+      - $ref: '#/components/parameters/OfferingId'
+      responses:
+        '200':
+          description: Offering detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExploreOfferingDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/explore/offerings/{offeringId}/purchase:
+    post:
+      operationId: purchaseOffering
+      tags:
+      - explore
+      summary: Buy a one-off item; the catalog price is the only price
+      parameters:
+      - $ref: '#/components/parameters/OfferingId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Instant payment captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/explore/offerings/{offeringId}/subscribe:
+    post:
+      operationId: subscribeOffering
+      tags:
+      - explore
+      summary: Subscribe to a plan; amount and interval come from the catalog
+      parameters:
+      - $ref: '#/components/parameters/OfferingId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A tenant API key (`sk_{env}_{id}_{secret}`), a wallet user token, or an IdP access
+        token. Which principal the credential resolves to decides the scopes it carries; see the authentication
+        guide.
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    MerchantId:
+      name: merchantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ClientId:
+      name: clientId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OfferingId:
+      name: offeringId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VariantId:
+      name: variantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ImportId:
+      name: importId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EndpointId:
+      name: endpointId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      description: Last seen id from the previous page
+      schema:
+        type: string
+        format: uuid
+    TenantFilter:
+      name: tenant_id
+      in: query
+      description: Restrict a cross-tenant listing to one tenant
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Health:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+    Tenant:
+      type: object
+      required:
+      - id
+      - name
+      - currency
+      - status
+      - fees
+      - commission_mode
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        currency:
+          type: string
+        status:
+          type: string
+        fees:
+          $ref: '#/components/schemas/FeeSchedule'
+        commission_mode:
+          $ref: '#/components/schemas/CommissionMode'
+        created_at:
+          type: string
+          format: date-time
+    CreateTenantRequest:
+      type: object
+      required:
+      - name
+      - currency
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+    TenantSummary:
+      type: object
+      required:
+      - tenant
+      - rows
+      - invariants_ok
+      properties:
+        tenant:
+          $ref: '#/components/schemas/Tenant'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/SummaryRow'
+        invariants_ok:
+          type: boolean
+        violations:
+          type: array
+          items:
+            type: string
+    PlatformOverview:
+      type: object
+      required:
+      - tenants
+      - totals
+      - as_of
+      properties:
+        tenants:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformTenantRow'
+        totals:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformTotal'
+        as_of:
+          type: string
+          format: date-time
+    PlatformTenantRow:
+      type: object
+      description: One tenant's position. Amounts are minor units of the tenant's own currency; balanced
+        says whether every commodity in this tenant's ledger nets to zero across all accounts.
+      required:
+      - tenant
+      - users
+      - transactions_30d
+      - volume_30d
+      - treasury
+      - user_cash
+      - merchant_settlement
+      - subscriptions_active
+      - balanced
+      properties:
+        tenant:
+          $ref: '#/components/schemas/Tenant'
+        users:
+          type: integer
+          format: int64
+        transactions_30d:
+          type: integer
+          format: int64
+        volume_30d:
+          type: integer
+          format: int64
+        treasury:
+          type: integer
+          format: int64
+        user_cash:
+          type: integer
+          format: int64
+        merchant_settlement:
+          type: integer
+          format: int64
+        subscriptions_active:
+          type: integer
+          format: int64
+        balanced:
+          type: boolean
+    PlatformTotal:
+      type: object
+      description: Whole-platform sums for one currency, never across currencies.
+      required:
+      - currency
+      - tenants
+      - users
+      - transactions_30d
+      - volume_30d
+      - treasury
+      - user_cash
+      - merchant_settlement
+      properties:
+        currency:
+          type: string
+        tenants:
+          type: integer
+          format: int64
+        users:
+          type: integer
+          format: int64
+        transactions_30d:
+          type: integer
+          format: int64
+        volume_30d:
+          type: integer
+          format: int64
+        treasury:
+          type: integer
+          format: int64
+        user_cash:
+          type: integer
+          format: int64
+        merchant_settlement:
+          type: integer
+          format: int64
+    PlatformTransaction:
+      type: object
+      required:
+      - id
+      - tenant_id
+      - tenant_name
+      - type
+      - status
+      - legs
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        tenant_name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        legs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionLeg'
+        created_at:
+          type: string
+          format: date-time
+    PlatformUser:
+      type: object
+      required:
+      - id
+      - tenant_id
+      - tenant_name
+      - external_id
+      - kind
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        tenant_name:
+          type: string
+        external_id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/UserKind'
+        display_name:
+          type: string
+        handle:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    PlatformSubscription:
+      type: object
+      required:
+      - id
+      - tenant_id
+      - tenant_name
+      - user_id
+      - merchant_id
+      - plan_name
+      - amount
+      - currency
+      - interval
+      - status
+      - next_charge_at
+      - retry_count
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        tenant_name:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        plan_name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        interval:
+          $ref: '#/components/schemas/SubscriptionInterval'
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        next_charge_at:
+          type: string
+          format: date-time
+        retry_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    EntryDirection:
+      type: string
+      enum:
+      - debit
+      - credit
+    UserTransaction:
+      type: object
+      required:
+      - txn_id
+      - txn_type
+      - purpose
+      - direction
+      - amount
+      - commodity
+      - created_at
+      properties:
+        txn_id:
+          type: string
+          format: uuid
+        txn_type:
+          type: string
+        purpose:
+          type: string
+        direction:
+          $ref: '#/components/schemas/EntryDirection'
+        amount:
+          type: integer
+          format: int64
+        commodity:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    TransactionLeg:
+      type: object
+      required:
+      - owner_type
+      - purpose
+      - direction
+      - amount
+      - commodity
+      properties:
+        owner_type:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        purpose:
+          type: string
+        direction:
+          $ref: '#/components/schemas/EntryDirection'
+        amount:
+          type: integer
+          format: int64
+        commodity:
+          type: string
+    Transaction:
+      type: object
+      required:
+      - id
+      - type
+      - status
+      - legs
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        status:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        legs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionLeg'
+        created_at:
+          type: string
+          format: date-time
+    SummaryRow:
+      type: object
+      required:
+      - owner_type
+      - purpose
+      - commodity
+      - balance
+      - accounts
+      properties:
+        owner_type:
+          type: string
+        purpose:
+          type: string
+        commodity:
+          type: string
+        balance:
+          type: integer
+          format: int64
+        accounts:
+          type: integer
+          format: int64
+    FeeRule:
+      type: object
+      description: What one money path costs. The proportional part is basis points of the amount and
+        rounds up; the flat part is minor units charged regardless of size; the result is then clamped
+        into the [min_fee, max_fee] band. A fee taken out of the money never exceeds the amount it comes
+        from.
+      required:
+      - bps
+      - flat
+      - min_fee
+      properties:
+        bps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        flat:
+          type: integer
+          format: int64
+          minimum: 0
+        min_fee:
+          type: integer
+          format: int64
+          minimum: 0
+        max_fee:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: Absent means uncapped. A cap of zero makes the path free.
+    FeeSchedule:
+      type: object
+      description: A tenant's price list, one rule per money path. An absent path charges nothing, so
+        a tenant provisioned before a path existed stays free on it. Payments and subscriptions deduct
+        their fee from the merchant's settlement; P2P adds it on top of what the sender pays; top-up deducts
+        it from what is credited; payout deducts it from what leaves.
+      properties:
+        payment:
+          $ref: '#/components/schemas/FeeRule'
+        subscription:
+          $ref: '#/components/schemas/FeeRule'
+        commission:
+          $ref: '#/components/schemas/FeeRule'
+        p2p:
+          $ref: '#/components/schemas/FeeRule'
+        topup:
+          $ref: '#/components/schemas/FeeRule'
+        payout:
+          $ref: '#/components/schemas/FeeRule'
+    CommissionMode:
+      type: string
+      enum:
+      - deduct
+      - add
+      description: Whether marketplace commission comes out of the merchant's settlement (the consumer
+        pays the list price) or is added to what the consumer pays (the merchant nets the full list price).
+    FeePlan:
+      type: object
+      required:
+      - fees
+      - commission_mode
+      properties:
+        fees:
+          $ref: '#/components/schemas/FeeSchedule'
+        commission_mode:
+          $ref: '#/components/schemas/CommissionMode'
+    UpdateFeePlanRequest:
+      type: object
+      description: Each named path's rule is replaced whole and every unnamed path is left alone, so clearing
+        a cap is expressible by sending the path without a max_fee.
+      properties:
+        fees:
+          $ref: '#/components/schemas/FeeSchedule'
+        commission_mode:
+          $ref: '#/components/schemas/CommissionMode'
+    LedgerSummary:
+      type: object
+      required:
+      - currency
+      - rows
+      - fee_plan
+      properties:
+        currency:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/SummaryRow'
+        fee_plan:
+          $ref: '#/components/schemas/FeePlan'
+    FlowRow:
+      type: object
+      description: Gross value moved by one transaction type in one commodity. Amount is the sum of the
+        credit legs, which for a balanced posting equals the value the transaction moved (a $10 payment
+        splitting into $9.90 settlement and $0.10 fee counts once, as $10).
+      required:
+      - type
+      - commodity
+      - count
+      - amount
+      - previous_count
+      - previous_amount
+      properties:
+        type:
+          type: string
+        commodity:
+          type: string
+        count:
+          type: integer
+          format: int64
+        amount:
+          type: integer
+          format: int64
+        previous_count:
+          type: integer
+          format: int64
+        previous_amount:
+          type: integer
+          format: int64
+    SeriesPoint:
+      type: object
+      description: One bucket of the movement series, in the tenant's currency.
+      required:
+      - start
+      - count
+      - amount
+      - by_type
+      properties:
+        start:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          format: int64
+        amount:
+          type: integer
+          format: int64
+        by_type:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+    RevenueSummary:
+      type: object
+      description: What the loop earned and spent in the window, in the tenant's currency.
+      required:
+      - fees_earned
+      - previous_fees_earned
+      - payment_volume
+      - take_rate_bps
+      - rewards_paid
+      - points_issued
+      - points_redeemed
+      - money_in
+      - money_out
+      properties:
+        fees_earned:
+          type: integer
+          format: int64
+          description: Credits to tenant and platform fee accounts.
+        previous_fees_earned:
+          type: integer
+          format: int64
+        payment_volume:
+          type: integer
+          format: int64
+        take_rate_bps:
+          type: integer
+          description: fees_earned over payment_volume, in basis points. Zero when there was no payment
+            volume.
+        rewards_paid:
+          type: integer
+          format: int64
+          description: Cash leaving marketing accounts as cashback and point conversions.
+        points_issued:
+          type: integer
+          format: int64
+        points_redeemed:
+          type: integer
+          format: int64
+        money_in:
+          type: integer
+          format: int64
+          description: Value that entered the loop through treasury (top-ups).
+        money_out:
+          type: integer
+          format: int64
+          description: Value that left the loop through treasury (merchant payouts).
+    PositionSummary:
+      type: object
+      description: Snapshot of what the loop holds and owes right now, in the tenant's currency, plus
+        the point liability counted separately.
+      required:
+      - treasury
+      - user_cash
+      - merchant_settlement
+      - fees
+      - marketing_pots
+      - marketing_drawn
+      - suspense
+      - credit_extended
+      - credit_granted
+      - funds_held
+      - points_outstanding
+      - funded_wallets
+      - active_wallets
+      properties:
+        treasury:
+          type: integer
+          format: int64
+          description: Value that entered the loop and has not left it.
+        user_cash:
+          type: integer
+          format: int64
+        merchant_settlement:
+          type: integer
+          format: int64
+        fees:
+          type: integer
+          format: int64
+        marketing_pots:
+          type: integer
+          format: int64
+          description: Funds sitting in marketing accounts, available to spend on rewards.
+        marketing_drawn:
+          type: integer
+          format: int64
+          description: Rewards already funded out of a marketing account that carries no balance of its
+            own — a tenant subsidy, spent.
+        suspense:
+          type: integer
+          format: int64
+        credit_extended:
+          type: integer
+          format: int64
+          description: Sum of the overdrawn user balances — money the loop has lent.
+        credit_granted:
+          type: integer
+          format: int64
+          description: Sum of the credit limits on user accounts.
+        funds_held:
+          type: integer
+          format: int64
+          description: Active authorisation holds against user balances.
+        points_outstanding:
+          type: integer
+          format: int64
+        funded_wallets:
+          type: integer
+          format: int64
+        active_wallets:
+          type: integer
+          format: int64
+          description: Wallets with at least one posting in the window.
+    OperationsSummary:
+      type: object
+      description: The queues and failure counts a wallet operator has to act on.
+      required:
+      - topups_succeeded
+      - topups_pending
+      - topups_failed
+      - topup_success_bps
+      - awaiting_capture
+      - awaiting_capture_amount
+      - holds_expiring_24h
+      - subscriptions_active
+      - subscriptions_past_due
+      - subscriptions_past_due_amount
+      - subscriptions_due_30d_amount
+      - subscriptions_mrr
+      - refunds
+      - refunds_amount
+      - payouts
+      - payouts_amount
+      - webhook_failures
+      properties:
+        topups_succeeded:
+          type: integer
+          format: int64
+        topups_pending:
+          type: integer
+          format: int64
+        topups_failed:
+          type: integer
+          format: int64
+        topup_success_bps:
+          type: integer
+          description: Succeeded over settled top-up intents, in basis points. Zero when none settled.
+        awaiting_capture:
+          type: integer
+          format: int64
+        awaiting_capture_amount:
+          type: integer
+          format: int64
+        holds_expiring_24h:
+          type: integer
+          format: int64
+        subscriptions_active:
+          type: integer
+          format: int64
+        subscriptions_past_due:
+          type: integer
+          format: int64
+        subscriptions_past_due_amount:
+          type: integer
+          format: int64
+        subscriptions_due_30d_amount:
+          type: integer
+          format: int64
+        subscriptions_mrr:
+          type: integer
+          format: int64
+          description: Recurring revenue committed by live plans, normalised to one month.
+        refunds:
+          type: integer
+          format: int64
+        refunds_amount:
+          type: integer
+          format: int64
+        payouts:
+          type: integer
+          format: int64
+        payouts_amount:
+          type: integer
+          format: int64
+        webhook_failures:
+          type: integer
+          format: int64
+    ReconciliationRow:
+      type: object
+      description: One commodity's books. A balanced ledger nets to zero per commodity; any other value
+        is a P1 defect, not a rounding artefact.
+      required:
+      - commodity
+      - net
+      - accounts
+      - balanced
+      properties:
+        commodity:
+          type: string
+        net:
+          type: integer
+          format: int64
+        accounts:
+          type: integer
+          format: int64
+        balanced:
+          type: boolean
+    MerchantVolume:
+      type: object
+      required:
+      - merchant_id
+      - name
+      - count
+      - amount
+      properties:
+        merchant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        count:
+          type: integer
+          format: int64
+        amount:
+          type: integer
+          format: int64
+    LedgerMetrics:
+      type: object
+      required:
+      - currency
+      - window
+      - from
+      - to
+      - as_of
+      - bucket
+      - flows
+      - series
+      - revenue
+      - position
+      - operations
+      - reconciliation
+      - top_merchants
+      properties:
+        currency:
+          type: string
+        window:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        as_of:
+          type: string
+          format: date-time
+        bucket:
+          type: string
+          enum:
+          - hour
+          - day
+          description: Granularity of the series points.
+        flows:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlowRow'
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeriesPoint'
+        revenue:
+          $ref: '#/components/schemas/RevenueSummary'
+        position:
+          $ref: '#/components/schemas/PositionSummary'
+        operations:
+          $ref: '#/components/schemas/OperationsSummary'
+        reconciliation:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReconciliationRow'
+        top_merchants:
+          type: array
+          items:
+            $ref: '#/components/schemas/MerchantVolume'
+    AuditEntry:
+      type: object
+      required:
+      - id
+      - actor_type
+      - actor_id
+      - action
+      - object_type
+      - object_id
+      - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        actor_type:
+          type: string
+        actor_id:
+          type: string
+        action:
+          type: string
+        object_type:
+          type: string
+        object_id:
+          type: string
+        before: {}
+        after: {}
+        created_at:
+          type: string
+          format: date-time
+    SupportAccessGrant:
+      type: object
+      required:
+      - id
+      - tenant_id
+      - staff_id
+      - reason
+      - ticket_reference
+      - created_by_type
+      - created_by_id
+      - created_at
+      - expires_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        staff_id:
+          type: string
+        reason:
+          type: string
+        ticket_reference:
+          type: string
+        created_by_type:
+          type: string
+        created_by_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        revoked_by_type:
+          type: string
+        revoked_by_id:
+          type: string
+    CreateSupportAccessGrantRequest:
+      type: object
+      required:
+      - staff_id
+      - reason
+      - ticket_reference
+      - expires_at
+      properties:
+        staff_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        ticket_reference:
+          type: string
+          minLength: 1
+          maxLength: 128
+        expires_at:
+          type: string
+          format: date-time
+    WebhookDelivery:
+      type: object
+      required:
+      - id
+      - endpoint_id
+      - event_id
+      - event_type
+      - attempt
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        endpoint_id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        attempt:
+          type: integer
+        status:
+          type: string
+        response_code:
+          type: integer
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    SubscriptionInterval:
+      type: string
+      enum:
+      - weekly
+      - monthly
+    SubscriptionStatus:
+      type: string
+      enum:
+      - active
+      - past_due
+      - paused
+      - canceled
+    Subscription:
+      type: object
+      required:
+      - id
+      - user_id
+      - merchant_id
+      - plan_name
+      - amount
+      - commission
+      - interval
+      - status
+      - next_charge_at
+      - retry_count
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        plan_name:
+          type: string
+        amount:
+          type: integer
+          format: int64
+        commission:
+          type: integer
+          format: int64
+          description: The marketplace take per period, fixed when the subscriber signed up so a later
+            rate change cannot move an agreed mandate.
+        interval:
+          $ref: '#/components/schemas/SubscriptionInterval'
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        next_charge_at:
+          type: string
+          format: date-time
+        retry_count:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateSubscriptionRequest:
+      type: object
+      required:
+      - user_id
+      - merchant_id
+      - plan_name
+      - amount
+      - interval
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        plan_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        interval:
+          $ref: '#/components/schemas/SubscriptionInterval'
+        start_at:
+          type: string
+          format: date-time
+          description: First charge time; defaults to now
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    SetCreditLimitRequest:
+      type: object
+      required:
+      - credit_limit
+      properties:
+        credit_limit:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Absolute floor in minor units the cash balance may go below zero
+    CreditLine:
+      type: object
+      required:
+      - user_id
+      - account_id
+      - credit_limit
+      - previous
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        credit_limit:
+          type: integer
+          format: int64
+        previous:
+          type: integer
+          format: int64
+    UserKind:
+      type: string
+      enum:
+      - consumer
+      - business
+    User:
+      type: object
+      required:
+      - id
+      - external_id
+      - kind
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        external_id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/UserKind'
+        display_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+        handle:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateUserRequest:
+      type: object
+      required:
+      - external_id
+      properties:
+        external_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          $ref: '#/components/schemas/UserKind'
+        display_name:
+          type: string
+          maxLength: 256
+        phone:
+          type: string
+          maxLength: 32
+        email:
+          type: string
+          format: email
+          maxLength: 256
+        handle:
+          type: string
+          maxLength: 64
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      properties:
+        type:
+          type: string
+          default: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          description: Stable machine-readable error code
+    UserBalance:
+      type: object
+      required:
+      - purpose
+      - commodity
+      - balance
+      - available
+      - held
+      properties:
+        purpose:
+          type: string
+        commodity:
+          type: string
+        balance:
+          type: integer
+          format: int64
+        available:
+          type: integer
+          format: int64
+        held:
+          type: integer
+          format: int64
+    Alias:
+      type: object
+      properties:
+        phone:
+          type: string
+        email:
+          type: string
+        handle:
+          type: string
+    CreateTransferRequest:
+      type: object
+      required:
+      - from_user
+      - amount
+      properties:
+        from_user:
+          type: string
+          format: uuid
+        to_user:
+          type: string
+          format: uuid
+        to_alias:
+          $ref: '#/components/schemas/Alias'
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        note:
+          type: string
+          maxLength: 256
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    Transfer:
+      type: object
+      required:
+      - id
+      - status
+      - from_user
+      - to_user
+      - amount
+      - fee
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        from_user:
+          type: string
+          format: uuid
+        to_user:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+        fee:
+          type: integer
+          format: int64
+        note:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateTopupRequest:
+      type: object
+      required:
+      - user_id
+      - amount
+      - gateway
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        gateway:
+          type: string
+    Topup:
+      type: object
+      required:
+      - id
+      - user_id
+      - amount
+      - gateway
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+        gateway:
+          type: string
+        status:
+          type: string
+          enum:
+          - created
+          - processing
+          - succeeded
+          - failed
+          - expired
+          - amount_mismatch
+          description: amount_mismatch parks a confirmation whose gateway-reported amount or currency
+            disagrees with the intent; nothing was credited and an operator must resolve it.
+        client_secret:
+          type: string
+          description: Mirror of next_action.client_secret for older consumers
+        next_action:
+          $ref: '#/components/schemas/TopupNextAction'
+        created_at:
+          type: string
+          format: date-time
+    CreateMerchantRequest:
+      type: object
+      required:
+      - external_id
+      - name
+      properties:
+        external_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        category:
+          type: string
+          maxLength: 128
+    Merchant:
+      type: object
+      required:
+      - id
+      - external_id
+      - name
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        external_id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    StatementEntry:
+      type: object
+      required:
+      - txn_id
+      - txn_type
+      - direction
+      - amount
+      - commodity
+      - created_at
+      properties:
+        txn_id:
+          type: string
+          format: uuid
+        txn_type:
+          type: string
+        direction:
+          type: string
+          enum:
+          - debit
+          - credit
+        amount:
+          type: integer
+          format: int64
+        commodity:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    LineItem:
+      type: object
+      required:
+      - name
+      - amount
+      properties:
+        name:
+          type: string
+          maxLength: 256
+        amount:
+          type: integer
+          format: int64
+    CreatePaymentRequest:
+      type: object
+      required:
+      - payer_user_id
+      - merchant_id
+      - amount
+      - mode
+      properties:
+        payer_user_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        mode:
+          type: string
+          enum:
+          - instant
+          - authorize
+        hold_ttl_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          description: Authorize mode only; defaults to 900
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    Payment:
+      type: object
+      required:
+      - id
+      - status
+      - mode
+      - payer_user_id
+      - merchant_id
+      - amount
+      - captured_amount
+      - refunded_amount
+      - fee
+      - commission
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - requires_capture
+          - captured
+          - voided
+          - expired
+        mode:
+          type: string
+        payer_user_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+        captured_amount:
+          type: integer
+          format: int64
+        refunded_amount:
+          type: integer
+          format: int64
+        fee:
+          type: integer
+          format: int64
+          description: The platform's processing fee, deducted from settlement.
+        commission:
+          type: integer
+          format: int64
+          description: The marketplace take on a catalog sale, credited to the loop that operates the
+            marketplace. Zero for a direct payment.
+        hold_expires_at:
+          type: string
+          format: date-time
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+        created_at:
+          type: string
+          format: date-time
+    CreateRefundRequest:
+      type: object
+      required:
+      - payment_id
+      - amount
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 256
+    Refund:
+      type: object
+      required:
+      - id
+      - payment_id
+      - amount
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+        status:
+          type: string
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateRewardRuleRequest:
+      type: object
+      required:
+      - kind
+      - params
+      properties:
+        kind:
+          type: string
+          enum:
+          - cashback
+          - accrual
+          - conversion
+        params:
+          type: object
+          additionalProperties: true
+          description: 'cashback: {rate_bps, fixed}; accrual: {rate_bps}; conversion: {minor_per_point,
+            min_points, max_points}'
+        scope:
+          type: object
+          properties:
+            merchant_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+            categories:
+              type: array
+              items:
+                type: string
+            offering_id:
+              type: string
+              format: uuid
+              description: Narrows the rule to a single catalog product.
+        caps:
+          type: object
+          properties:
+            per_txn:
+              type: integer
+              format: int64
+            per_user_day:
+              type: integer
+              format: int64
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+    RewardRule:
+      type: object
+      required:
+      - id
+      - kind
+      - params
+      - status
+      - version
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+        scope:
+          type: object
+          additionalProperties: true
+        caps:
+          type: object
+          additionalProperties: true
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        disabled_at:
+          type: string
+          format: date-time
+          description: When the rule was switched off. Reward evaluation reads this as of the moment a
+            payment was captured, so a rule disabled after a sale still pays that sale. Absent on an active
+            rule, and also absent on a rule disabled before this field existed, which is excluded from
+            evaluation outright because there is no honest instant to compare against.
+    Conversion:
+      type: object
+      required:
+      - id
+      - user_id
+      - points
+      - cash_credited
+      - minor_per_point
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        points:
+          type: integer
+          format: int64
+        cash_credited:
+          type: integer
+          format: int64
+        minor_per_point:
+          type: integer
+          format: int64
+    RewardGrant:
+      type: object
+      required:
+      - id
+      - rule_id
+      - kind
+      - user_id
+      - source_txn
+      - amount
+      - txn_id
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        rule_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        source_txn:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+        txn_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    CreateWebhookEndpointRequest:
+      type: object
+      required:
+      - url
+      properties:
+        url:
+          type: string
+          format: uri
+          maxLength: 1024
+        event_filters:
+          type: array
+          items:
+            type: string
+          description: Event types to deliver; empty means all
+    WebhookEndpoint:
+      type: object
+      required:
+      - id
+      - url
+      - event_filters
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+          description: The merchant this endpoint belongs to; absent on a tenant-wide endpoint
+        url:
+          type: string
+        event_filters:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        secret:
+          type: string
+          description: Signing secret, returned only on creation
+        created_at:
+          type: string
+          format: date-time
+    WebhookEvent:
+      type: object
+      required:
+      - id
+      - type
+      - created_at
+      - data
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+    CatalogClientStatus:
+      type: string
+      enum:
+      - pending
+      - active
+      - suspended
+      description: 'A self-onboarded client starts pending: it can build its profile and draft offerings,
+        but nothing reaches Explore until the platform approves it. Suspended hides its catalog again
+        without touching its money.'
+    PlatformClient:
+      type: object
+      required:
+      - id
+      - tenant_id
+      - tenant_name
+      - merchant_id
+      - org_alias
+      - display_name
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        tenant_name:
+          type: string
+        merchant_id:
+          type: string
+          format: uuid
+        org_alias:
+          type: string
+        display_name:
+          type: string
+        category:
+          type: string
+        status:
+          $ref: '#/components/schemas/CatalogClientStatus'
+        approved_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    UpdateOfferingRequest:
+      type: object
+      required:
+      - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2048
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Reprices a plan (drafts only) or a single-variant item's default variant; a multi-variant
+            item is priced through its variants.
+        image_url:
+          type: string
+          maxLength: 512
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+        options:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            maxLength: 64
+          description: Option names may be renamed, not added or removed.
+        markup:
+          $ref: '#/components/schemas/Markup'
+    ClientSale:
+      type: object
+      required:
+      - payment_id
+      - amount
+      - fee
+      - commission
+      - refunded
+      - net
+      - status
+      - created_at
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+          description: Set when the sale came through a cart order.
+        offering_id:
+          type: string
+          format: uuid
+          description: Absent when the sale did not come from the catalog.
+        title:
+          type: string
+        amount:
+          type: integer
+          format: int64
+        fee:
+          type: integer
+          format: int64
+        commission:
+          type: integer
+          format: int64
+        refunded:
+          type: integer
+          format: int64
+        net:
+          type: integer
+          format: int64
+          description: What reached settlement, so amount less fee, commission and refunds.
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ClientSalesSummary:
+      type: object
+      required:
+      - sales
+      - gross
+      - fees
+      - commission
+      - refunded
+      - net
+      - subscribers
+      properties:
+        sales:
+          type: integer
+          format: int64
+        gross:
+          type: integer
+          format: int64
+        fees:
+          type: integer
+          format: int64
+        commission:
+          type: integer
+          format: int64
+        refunded:
+          type: integer
+          format: int64
+        net:
+          type: integer
+          format: int64
+        subscribers:
+          type: integer
+          format: int64
+          description: Live mandates, counting active and past-due.
+    ClientSales:
+      type: object
+      required:
+      - summary
+      - sales
+      properties:
+        summary:
+          $ref: '#/components/schemas/ClientSalesSummary'
+        sales:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientSale'
+    CatalogClient:
+      type: object
+      required:
+      - id
+      - merchant_id
+      - org_alias
+      - display_name
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        org_alias:
+          type: string
+        display_name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        logo_url:
+          type: string
+        commission_bps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: Overrides the loop's commission rate for this client. Absent means no deal here
+            and the loop's rate applies; zero means this client sells commission-free.
+        status:
+          $ref: '#/components/schemas/CatalogClientStatus'
+        approved_at:
+          type: string
+          format: date-time
+          description: When the platform first let this client publish. Absent while pending.
+        created_at:
+          type: string
+          format: date-time
+    OnboardClientRequest:
+      type: object
+      required:
+      - display_name
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 2048
+        logo_url:
+          type: string
+          maxLength: 512
+    ClientProfileRequest:
+      type: object
+      required:
+      - display_name
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        category:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 2048
+        logo_url:
+          type: string
+          maxLength: 512
+    Offering:
+      type: object
+      required:
+      - id
+      - client_id
+      - kind
+      - title
+      - amount
+      - options
+      - variants
+      - status
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - item
+          - plan
+        title:
+          type: string
+        description:
+          type: string
+        amount:
+          type: integer
+          format: int64
+          description: The plan price, or for an item the lowest live variant price.
+        interval:
+          type: string
+          enum:
+          - weekly
+          - monthly
+        image_url:
+          type: string
+          maxLength: 512
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Whatever the vertical needs and the platform does not model.
+        commission_bps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: Overrides both the client's rate and the loop's for this one offering, which is
+            how a promotion is priced.
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+        options:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+          description: The product's variant axes (Size, Colour), in the order every variant lists its
+            values. Empty for a single-variant item.
+        markup:
+          $ref: '#/components/schemas/Markup'
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Variant'
+          description: Live variants of an item; empty for plans.
+        status:
+          type: string
+          enum:
+          - draft
+          - published
+          - archived
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Markup:
+      type: object
+      required:
+      - kind
+      - value
+      nullable: true
+      description: 'What a merchant adds to a cost to reach a sell price. percent is basis points of the
+        cost; fixed is minor units on top. Resolves most specific wins: variant, then product, then shop.'
+      properties:
+        kind:
+          type: string
+          enum:
+          - percent
+          - fixed
+        value:
+          type: integer
+          format: int64
+          minimum: 0
+    Rounding:
+      type: object
+      required:
+      - increment
+      - offset
+      description: Lands a derived price on a friendly number. increment is in minor units (100 puts a
+        two-decimal currency on whole units, 0 disables rounding); offset nudges the result (-1 gives
+        x.99).
+      properties:
+        increment:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          format: int64
+    Pricing:
+      type: object
+      required:
+      - rounding
+      description: A shop's pricing defaults for cost_plus variants.
+      properties:
+        markup:
+          $ref: '#/components/schemas/Markup'
+        rounding:
+          $ref: '#/components/schemas/Rounding'
+        repriced_variants:
+          type: integer
+          description: On a write, how many variants changed price as a result.
+    VariantInventory:
+      type: object
+      required:
+      - track_inventory
+      - in_stock
+      - low_stock
+      description: Stock as the caller may see it. Shoppers get the three flags only; the merchant also
+        gets the counts and the policy.
+      properties:
+        track_inventory:
+          type: boolean
+        in_stock:
+          type: boolean
+        low_stock:
+          type: boolean
+        on_hand:
+          type: integer
+          format: int64
+        reserved:
+          type: integer
+          format: int64
+        available:
+          type: integer
+          format: int64
+        allow_backorder:
+          type: boolean
+        low_stock_threshold:
+          type: integer
+          format: int64
+          nullable: true
+    Variant:
+      type: object
+      required:
+      - id
+      - offering_id
+      - option_values
+      - position
+      - amount
+      - inventory
+      - status
+      - created_at
+      - updated_at
+      description: The sellable unit. cost_amount, markup and pricing_mode appear only to the merchant.
+      properties:
+        id:
+          type: string
+          format: uuid
+        offering_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+          maxLength: 64
+        barcode:
+          type: string
+          maxLength: 64
+        option_values:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+        position:
+          type: integer
+        pricing_mode:
+          type: string
+          enum:
+          - manual
+          - cost_plus
+        cost_amount:
+          type: integer
+          format: int64
+        markup:
+          $ref: '#/components/schemas/Markup'
+        amount:
+          type: integer
+          format: int64
+        image_url:
+          type: string
+          maxLength: 512
+        inventory:
+          $ref: '#/components/schemas/VariantInventory'
+        status:
+          type: string
+          enum:
+          - active
+          - archived
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    VariantInput:
+      type: object
+      description: A variant as the merchant writes it. amount is required in manual mode and ignored
+        in cost_plus mode, where it derives from cost_amount and the most specific markup. initial_stock
+        is honoured on create only; later counts change through the stock endpoint so the movement log
+        is whole.
+      properties:
+        sku:
+          type: string
+          maxLength: 64
+        barcode:
+          type: string
+          maxLength: 64
+        option_values:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            maxLength: 64
+        position:
+          type: integer
+          minimum: 0
+        pricing_mode:
+          type: string
+          enum:
+          - manual
+          - cost_plus
+          default: manual
+        cost_amount:
+          type: integer
+          format: int64
+          minimum: 0
+        markup:
+          $ref: '#/components/schemas/Markup'
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        image_url:
+          type: string
+          maxLength: 512
+        track_inventory:
+          type: boolean
+          default: false
+        allow_backorder:
+          type: boolean
+          default: false
+        low_stock_threshold:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        initial_stock:
+          type: integer
+          format: int64
+          minimum: 0
+    OfferingPage:
+      type: object
+      required:
+      - offerings
+      properties:
+        offerings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Offering'
+        next_cursor:
+          type: string
+          format: uuid
+          description: Pass back as cursor for the next page; absent on the last page.
+    StockAdjustmentRequest:
+      type: object
+      description: Exactly one of delta (signed change) or set_to (absolute count).
+      properties:
+        delta:
+          type: integer
+          format: int64
+        set_to:
+          type: integer
+          format: int64
+          minimum: 0
+        reason:
+          type: string
+          maxLength: 256
+    StockAdjustmentResult:
+      type: object
+      required:
+      - variant
+      - movement
+      properties:
+        variant:
+          $ref: '#/components/schemas/Variant'
+        movement:
+          $ref: '#/components/schemas/InventoryMovement'
+    InventoryMovement:
+      type: object
+      required:
+      - id
+      - variant_id
+      - kind
+      - quantity
+      - on_hand_after
+      - reserved_after
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        variant_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - adjustment
+          - import
+          - reservation
+          - release
+          - sale
+          - restock
+        quantity:
+          type: integer
+          format: int64
+          description: Signed change to the counter the kind names.
+        on_hand_after:
+          type: integer
+          format: int64
+        reserved_after:
+          type: integer
+          format: int64
+        reason:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+        actor_type:
+          type: string
+        actor_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    PriceChange:
+      type: object
+      required:
+      - id
+      - offering_id
+      - variant_id
+      - new_amount
+      - source
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        offering_id:
+          type: string
+          format: uuid
+        variant_id:
+          type: string
+          format: uuid
+        old_amount:
+          type: integer
+          format: int64
+          nullable: true
+        new_amount:
+          type: integer
+          format: int64
+        source:
+          type: string
+          enum:
+          - manual
+          - markup
+          - import
+        actor_type:
+          type: string
+        actor_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Category:
+      type: object
+      required:
+      - id
+      - name
+      - slug
+      - position
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        slug:
+          type: string
+        position:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    CategoryInput:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 96
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: A top-level category; trees are one level deep.
+        position:
+          type: integer
+          minimum: 0
+    OrderLine:
+      type: object
+      required:
+      - id
+      - offering_id
+      - variant_id
+      - title
+      - unit_amount
+      - quantity
+      - line_amount
+      - commission
+      description: A snapshot of what was bought at the price it was bought.
+      properties:
+        id:
+          type: string
+          format: uuid
+        offering_id:
+          type: string
+          format: uuid
+        variant_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        variant_title:
+          type: string
+          description: The option values joined ("L / Red"); absent for a default variant.
+        sku:
+          type: string
+        unit_amount:
+          type: integer
+          format: int64
+        quantity:
+          type: integer
+          format: int64
+        line_amount:
+          type: integer
+          format: int64
+        commission:
+          type: integer
+          format: int64
+    Order:
+      type: object
+      required:
+      - id
+      - client_id
+      - merchant_id
+      - user_id
+      - status
+      - subtotal
+      - commission
+      - total
+      - expires_at
+      - created_at
+      - updated_at
+      - lines
+      description: A cart from one merchant. open holds its stock until expires_at; paying is the moment
+        between claiming the order and the payment landing; paid, canceled and expired are final.
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - open
+          - paying
+          - paid
+          - canceled
+          - expired
+        subtotal:
+          type: integer
+          format: int64
+        commission:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+          description: What the buyer pays; differs from subtotal only when the loop adds commission on
+            top.
+        payment_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+        restocked_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderLine'
+    OrderLineInput:
+      type: object
+      required:
+      - variant_id
+      - quantity
+      properties:
+        variant_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000
+    CreateOrderRequest:
+      type: object
+      required:
+      - lines
+      description: Lines from one merchant. Prices come from the catalog; the buyer never sends an amount.
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/OrderLineInput'
+    OrderPayment:
+      type: object
+      required:
+      - order
+      - payment
+      properties:
+        order:
+          $ref: '#/components/schemas/Order'
+        payment:
+          $ref: '#/components/schemas/Payment'
+    CatalogImport:
+      type: object
+      required:
+      - id
+      - client_id
+      - status
+      - file_name
+      - has_images
+      - row_count
+      - create_count
+      - update_count
+      - error_count
+      - applied_count
+      - created_at
+      - updated_at
+      description: 'A bulk import. validating: the file is being parsed and previewed; ready: the preview
+        is complete and the merchant may commit or cancel; committing: the rows are being applied; done,
+        failed and canceled are final. error is the fatal reason for failed; row problems are on the rows.'
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - validating
+          - ready
+          - committing
+          - done
+          - failed
+          - canceled
+        file_name:
+          type: string
+        has_images:
+          type: boolean
+        row_count:
+          type: integer
+        create_count:
+          type: integer
+        update_count:
+          type: integer
+        error_count:
+          type: integer
+        applied_count:
+          type: integer
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        committed_at:
+          type: string
+          format: date-time
+    CatalogImportRow:
+      type: object
+      required:
+      - row_no
+      - action
+      - payload
+      - errors
+      - applied
+      properties:
+        row_no:
+          type: integer
+          description: The spreadsheet line, header being line 1.
+        action:
+          type: string
+          enum:
+          - create
+          - update
+          - error
+        sku:
+          type: string
+        product_handle:
+          type: string
+        title:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+          description: The row as the parser understood it.
+        errors:
+          type: array
+          items:
+            type: string
+        image_url:
+          type: string
+          description: The stored public image this row will use.
+        applied:
+          type: boolean
+    MerchantApiKey:
+      type: object
+      required:
+      - id
+      - env
+      - name
+      - scopes
+      - status
+      - created_at
+      description: An API key bound to one merchant. It acts as that merchant on every /v1/clients/{clientId}
+        route and carries no tenant-wide scope. The token itself is returned once, at issuance.
+      properties:
+        id:
+          type: string
+          format: uuid
+        env:
+          type: string
+          enum:
+          - sandbox
+          - live
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+          - active
+          - revoked
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+    IssuedMerchantApiKey:
+      type: object
+      required:
+      - key
+      - token
+      properties:
+        key:
+          $ref: '#/components/schemas/MerchantApiKey'
+        token:
+          type: string
+          description: Shown once. Store it in your system's secret store now.
+    IssueMerchantApiKeyRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: What system will hold it (e.g. "Shopify sync", "POS till 2").
+        env:
+          type: string
+          enum:
+          - sandbox
+          - live
+          default: live
+    CreateOfferingRequest:
+      type: object
+      required:
+      - kind
+      - title
+      properties:
+        kind:
+          type: string
+          enum:
+          - item
+          - plan
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2048
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The plan price, or the price of an item's default variant when no variants are
+            given. Ignored when variants are given.
+        image_url:
+          type: string
+          maxLength: 512
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        interval:
+          type: string
+          enum:
+          - weekly
+          - monthly
+          description: Required for plans, forbidden for items
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+        options:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            maxLength: 64
+          description: Variant axes; a product with options must list its variants.
+        markup:
+          $ref: '#/components/schemas/Markup'
+        variants:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/VariantInput'
+    MarketingView:
+      type: object
+      required:
+      - settlement_balance
+      - marketing_balance
+      properties:
+        settlement_balance:
+          type: integer
+          format: int64
+        marketing_balance:
+          type: integer
+          format: int64
+    FundMarketingRequest:
+      type: object
+      required:
+      - amount
+      properties:
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+    FundMarketingResult:
+      type: object
+      required:
+      - txn_id
+      - amount
+      properties:
+        txn_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+    SetClientCommissionRequest:
+      type: object
+      properties:
+        commission_bps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          nullable: true
+          description: The commission rate in basis points charged on this merchant's sales. Null clears
+            the deal so the tenant's default rate applies; zero is a real rate meaning the merchant is
+            sold commission-free.
+      description: Only the rate is negotiable; the flat part and band stay with the tenant plan.
+    ClientRewardRuleRequest:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - cashback
+          - accrual
+          default: cashback
+          description: cashback pays money back from this merchant's own marketing pot; accrual grants
+            tenant-issued loyalty points. Defaults to cashback.
+        offering_id:
+          type: string
+          format: uuid
+          description: When set, the rule applies only to this one product of the merchant and overrides
+            the merchant's common rule of the same kind. Absent is the common rule that applies to all
+            of the merchant's products.
+        rate_bps:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          description: Cashback rate in basis points (0-10000). For accrual this is the points-per-unit
+            rate (1-100000).
+        fixed:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Flat cashback added on top of the rate. Cashback only.
+        per_txn_cap:
+          type: integer
+          format: int64
+          minimum: 0
+        per_user_day_cap:
+          type: integer
+          format: int64
+          minimum: 0
+      description: Scope and funding are pinned to the calling merchant; the rule is either common (all
+        products) or per-product, and either cashback or loyalty.
+    ExploreClientDetail:
+      type: object
+      required:
+      - client
+      - offerings
+      properties:
+        client:
+          $ref: '#/components/schemas/CatalogClient'
+        offerings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Offering'
+    ExploreOfferingDetail:
+      type: object
+      required:
+      - offering
+      - client
+      properties:
+        offering:
+          $ref: '#/components/schemas/Offering'
+        client:
+          $ref: '#/components/schemas/CatalogClient'
+    TierLimits:
+      type: object
+      required:
+      - tier
+      - max_balance
+      - topup_per_day
+      - p2p_per_day
+      - updated_at
+      properties:
+        tier:
+          type: string
+        max_balance:
+          type: integer
+          format: int64
+          description: 0 means unlimited
+        topup_per_day:
+          type: integer
+          format: int64
+          description: 0 means unlimited
+        p2p_per_day:
+          type: integer
+          format: int64
+          description: 0 means unlimited
+        updated_at:
+          type: string
+          format: date-time
+    SetTierLimitsRequest:
+      type: object
+      required:
+      - tier
+      properties:
+        tier:
+          type: string
+          minLength: 1
+          maxLength: 32
+        max_balance:
+          type: integer
+          format: int64
+          minimum: 0
+        topup_per_day:
+          type: integer
+          format: int64
+          minimum: 0
+        p2p_per_day:
+          type: integer
+          format: int64
+          minimum: 0
+    Payout:
+      type: object
+      required:
+      - id
+      - merchant_id
+      - amount
+      - fee
+      - txn_id
+      - rail
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: What left the merchant's settlement balance.
+        fee:
+          type: integer
+          format: int64
+          description: The part of the amount the wallet kept, so amount less fee is what the merchant
+            receives.
+        txn_id:
+          type: string
+          format: uuid
+        rail:
+          type: string
+        external_ref:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending_transfer
+          - completed
+        created_at:
+          type: string
+          format: date-time
+    TopupMethod:
+      type: object
+      required:
+      - gateway
+      - flow
+      properties:
+        gateway:
+          type: string
+        flow:
+          type: string
+          enum:
+          - client_secret
+          - redirect
+          - dev
+        currencies:
+          type: array
+          items:
+            type: string
+    TopupNextAction:
+      type: object
+      required:
+      - kind
+      properties:
+        kind:
+          type: string
+          enum:
+          - client_secret
+          - redirect
+        client_secret:
+          type: string
+        redirect_url:
+          type: string

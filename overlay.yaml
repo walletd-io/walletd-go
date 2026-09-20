@@ -1,0 +1,15 @@
+overlay: 1.0.0
+info:
+  title: walletd-go codegen overlay
+  version: 1.0.0
+# The contract in api/openapi.yaml is a byte copy of the published document and
+# is never edited. This overlay carries the one code-generation hint the SDK
+# needs, applied at generate time.
+actions:
+  # The SDK defines IdempotencyKey itself as a distinct string type, so that a
+  # money-moving call cannot be handed an arbitrary string and cannot be made
+  # without a key at all. Move the generated alias out of the way; the header
+  # name on the wire is untouched.
+  - target: $.components.parameters.IdempotencyKey
+    update:
+      x-go-name: IdempotencyKeyHeader

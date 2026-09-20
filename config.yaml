@@ -1,0 +1,8 @@
+package: walletd
+output: types.gen.go
+generate:
+  models: true
+output-options:
+  overlay:
+    path: overlay.yaml
+    strict: true
