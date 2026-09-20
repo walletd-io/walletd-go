@@ -115,10 +115,14 @@ var (
 	ErrRateLimited   = errors.New("rate limited")
 	ErrServer        = errors.New("server error")
 
-	// ErrTransport is a request that never got an answer: DNS, dial, TLS
-	// or a read failure. Whether the call landed is unknown, which is
+	// ErrTransport is a request that never got a complete answer: DNS,
+	// dial, TLS or a response read failure. Whether the call landed is unknown, which is
 	// exactly what an idempotency key is for.
 	ErrTransport = errors.New("transport failure")
+
+	// ErrUnexpectedStatus indicates a non-2xx response outside the HTTP problem range.
+	// Redirects are not followed; configure the API host directly.
+	ErrUnexpectedStatus = errors.New("unexpected HTTP status")
 )
 
 // Problem-code sentinels for the documented codes.

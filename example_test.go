@@ -95,6 +95,10 @@ func Example() {
 // ExampleVerifySignature is the README's receiver, compiled.
 func ExampleVerifySignature() {
 	secret := os.Getenv("WALLETD_WEBHOOK_SECRET")
+	// Inject your durable inbox implementation here. Fail closed until wired.
+	enqueue := func(event walletd.Event) error {
+		return fmt.Errorf("configure durable inbox for %s/%s", event.TenantID, event.ID)
+	}
 
 	http.HandleFunc("/webhooks/walletd", func(w http.ResponseWriter, r *http.Request) {
 		// The RAW bytes are what was signed. Decoding and re-encoding the
@@ -117,20 +121,10 @@ func ExampleVerifySignature() {
 			return
 		}
 
-		// Delivery is at-least-once: X-Wallet-Event-Id is the dedupe key.
-		// Answer fast and do the work elsewhere.
-		go func() {
-			switch event.Type {
-			case "topup.succeeded":
-				var topup walletd.Topup
-				if err := event.Into("topup", &topup); err != nil {
-					return
-				}
-				fmt.Println("credited", topup.UserId, topup.Amount)
-			default:
-				// New types are added without warning. Ignore, do not crash.
-			}
-		}()
+		if err := enqueue(event); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 }

@@ -256,3 +256,39 @@ func TestUnknownEventTypeStillParses(t *testing.T) {
 		t.Errorf("Type = %q", event.Type)
 	}
 }
+
+func TestParseEventRequiresSignedIdentity(t *testing.T) {
+	for _, body := range []string{
+		`{"type":"x"}`,
+		strings.Replace(katBody, `"id":"019fedda-88ef-7253-8253-14d9e24723fb"`, `"id":null`, 1),
+		strings.Replace(katBody, `019fedcf-70a4-7ecd-bda1-f45dd0fdc0ca`, `00000000-0000-0000-0000-000000000000`, 1),
+	} {
+		if _, err := ParseEvent([]byte(body)); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
+func TestUnsignedHeaderCannotChangeSignedIdentity(t *testing.T) {
+	// This models receiver key selection, not durable database crash recovery.
+	seen := map[string]bool{}
+	effects := 0
+	for _, advisoryID := range []string{"first", "changed", "first"} {
+		_ = advisoryID // deliberately not an authority for the processing identity
+		if err := verifySignatureAt(katHeader, []byte(katBody), katSecret, DefaultTolerance, katSignedAt); err != nil {
+			t.Fatal(err)
+		}
+		event, err := ParseEvent([]byte(katBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := event.TenantID.String() + "/" + event.ID.String()
+		if !seen[key] {
+			seen[key] = true
+			effects++
+		}
+	}
+	if effects != 1 {
+		t.Fatalf("effects=%d", effects)
+	}
+}

@@ -17,8 +17,8 @@ import (
 // SignatureHeader is the header WalletD signs every delivery with.
 const SignatureHeader = "X-Wallet-Signature"
 
-// EventIDHeader carries the event id. It is the deduplication key for an
-// at-least-once feed: record it and make reprocessing a no-op.
+// EventIDHeader carries an advisory, unsigned event id. After verifying and
+// parsing the body, deduplicate on Event.TenantID and Event.ID from that body.
 const EventIDHeader = "X-Wallet-Event-Id"
 
 // DefaultTolerance is the timestamp skew the platform documents: five
@@ -55,7 +55,8 @@ var (
 //
 // A nil return means the delivery came from WalletD and has not been
 // altered. It says nothing about whether you have already processed this
-// event — that is what EventIDHeader is for.
+// event. ParseEvent validates the signed envelope identifiers; use its
+// TenantID and ID as the durable deduplication key. Other HTTP headers are unsigned.
 //
 //	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 //	if err != nil { ... }
@@ -147,8 +148,8 @@ func ParseEvent(body []byte) (Event, error) {
 	if err := json.Unmarshal(body, &e); err != nil {
 		return Event{}, fmt.Errorf("walletd: decode event: %w", err)
 	}
-	if e.Type == "" {
-		return Event{}, fmt.Errorf("walletd: decode event: no type")
+	if e.Type == "" || e.ID == uuid.Nil || e.TenantID == uuid.Nil {
+		return Event{}, fmt.Errorf("walletd: decode event: nonzero id, tenant_id and type required")
 	}
 	return e, nil
 }

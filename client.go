@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -66,12 +68,12 @@ func CredentialFunc(f func(ctx context.Context) (string, error)) Credential {
 
 // RetryPolicy bounds automatic retries.
 //
-// Only two classes of answer are ever retried: 429, which means the request
-// was refused before it was acted on, and 5xx, which is retried only when
-// the request is replay-safe — a GET, or a call carrying an idempotency
-// key. Every other 4xx is a statement about the request itself and is
-// returned to the caller unchanged; retrying it would only waste the rate
-// budget.
+// Replay-safe transport failures (including interrupted response bodies) are
+// retried. HTTP retries cover 429 (refused before it was acted on), plus
+// 500/502/503/504 when the request is replay-safe: GET/HEAD or a call
+// carrying an idempotency key. Every other 4xx is a statement about the
+// request itself and is returned unchanged; retrying it would only waste
+// the rate budget.
 type RetryPolicy struct {
 	// MaxAttempts counts the first attempt. 1 disables retries.
 	MaxAttempts int
@@ -104,7 +106,8 @@ type Client struct {
 type Option func(*Client)
 
 // WithHTTPClient replaces the HTTP client, for a custom transport, proxy,
-// timeout or instrumentation.
+// timeout or instrumentation. Redirects are always refused by the SDK; the
+// supplied client is copied and its CheckRedirect policy is not used.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) {
 		if h != nil {
@@ -172,6 +175,10 @@ func New(baseURL string, cred Credential, opts ...Option) (*Client, error) {
 	for _, opt := range opts {
 		opt(c)
 	}
+	// Never redirect credentialed API operations or silently rewrite POST to GET.
+	h := *c.http
+	h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.http = &h
 	return c, nil
 }
 
@@ -265,7 +272,7 @@ func (c *Client) do(ctx context.Context, method, path string, idem IdempotencyKe
 			return fmt.Errorf("%w: %s %s: %w", ErrTransport, method, path, err)
 		}
 
-		if resp.StatusCode >= 400 {
+		if resp.StatusCode >= 400 && resp.StatusCode < 600 {
 			problem := decodeProblem(resp)
 			retryAfter, hasRetryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 			drainClose(resp)
@@ -289,15 +296,42 @@ func (c *Client) do(ctx context.Context, method, path string, idem IdempotencyKe
 			continue
 		}
 
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			drainClose(resp)
+			return fmt.Errorf("%w: %s %s: HTTP %d", ErrUnexpectedStatus, method, path, resp.StatusCode)
+		}
+
 		if out == nil {
 			drainClose(resp)
 			return nil
 		}
-		decErr := json.NewDecoder(resp.Body).Decode(out)
-		drainClose(resp)
+		// Decode each attempt into fresh state; never expose a partial answer.
+		result := reflect.New(reflect.TypeOf(out).Elem())
+		data, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		var decErr error
+		if readErr == nil {
+			decErr = json.NewDecoder(bytes.NewReader(data)).Decode(result.Interface())
+		}
+		if readErr != nil || errors.Is(decErr, io.EOF) || errors.Is(decErr, io.ErrUnexpectedEOF) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if replaySafe && attempt < c.retry.MaxAttempts {
+				if err := c.wait(ctx, c.backoff(attempt)); err != nil {
+					return err
+				}
+				continue
+			}
+			if readErr == nil {
+				readErr = decErr
+			}
+			return fmt.Errorf("%w: read %s %s: %w", ErrTransport, method, path, readErr)
+		}
 		if decErr != nil {
 			return fmt.Errorf("walletd decode %s %s: %w", method, path, decErr)
 		}
+		reflect.ValueOf(out).Elem().Set(result.Elem())
 		return nil
 	}
 }

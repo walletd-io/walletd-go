@@ -132,7 +132,8 @@ refreshes without rebuilding the client.
 
 ## Errors
 
-Every failure is a `*walletd.Problem` — the contract's own RFC 7807 schema.
+HTTP 4xx/5xx failures return a `*walletd.Problem` using the contract's RFC 7807 schema.
+Transport, decoding, cancellation and unexpected-status errors are separate.
 **Branch on `Code`, never on `Title` or `Detail`:** the code is the stable
 contract and the prose is not.
 
@@ -144,7 +145,8 @@ case errors.Is(err, walletd.ErrInsufficientFunds):   // code insufficient_funds
 case errors.Is(err, walletd.ErrTierLimitExceeded):   // code tier_limit_exceeded
 case errors.Is(err, walletd.ErrInsufficientScope):   // code insufficient_scope
 case errors.Is(err, walletd.ErrUnprocessable):       // any 422, code or not
-case errors.Is(err, walletd.ErrTransport):           // no answer at all
+case errors.Is(err, walletd.ErrTransport):           // missing or interrupted answer
+case errors.Is(err, walletd.ErrUnexpectedStatus):    // unexpected non-2xx, including redirects
 }
 
 var p *walletd.Problem
@@ -243,12 +245,35 @@ Iterators: `Users`, `UserTransactions`, `Transactions`, `Subscriptions`,
 `Orders`, `WebhookDeliveries`, `ExploreClients`, and `ClientOfferings`
 (which follows the envelope's `next_cursor`).
 
+## Response handling
+
+Interrupted or empty expected JSON responses match `ErrTransport`. GET/HEAD and
+keyed writes retry within the configured budget using the original request bytes
+and key; unkeyed writes do not retry these failures. Valid but incompatible JSON
+returns a decode error without retrying. Failed attempts never populate results.
+Cancellation stops retries.
+
+Only 2xx responses enter success decoding. Redirects are always refused, including
+with `WithHTTPClient`: the SDK copies the supplied client and replaces its
+`CheckRedirect` policy without mutating the original. Point the SDK directly at
+the API host. Unexpected non-2xx statuses outside 4xx/5xx match
+`ErrUnexpectedStatus`; a redirect cannot silently replay a write or turn it into
+GET. These are local, unreleased changes until an SDK version is published.
+
 ## Webhooks
 
 Verifying the signature is not optional: your endpoint is a public URL.
+`X-Wallet-Event-Id` is unsigned. Deduplicate using the verified body's
+`Event.TenantID` and `Event.ID`; `ParseEvent` rejects missing or zero IDs.
+The callback below must commit a durable inbox row with a unique tenant/event key;
+a duplicate is successful acceptance. Only then acknowledge. Workers must commit
+local effects and their processed marker atomically, or use an outbox and stable
+idempotency key for remote effects. Check a configured tenant against the signed
+envelope before acceptance.
 
 ```go
-func handler(secret string) http.HandlerFunc {
+// enqueue commits a unique (TenantID, ID) inbox row before returning nil.
+func handler(secret string, enqueue func(walletd.Event) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// The RAW bytes are what was signed. Decoding and re-encoding the
 		// JSON changes key order, and the hash with it.
@@ -270,23 +295,15 @@ func handler(secret string) http.HandlerFunc {
 			return
 		}
 
-		// Delivery is at-least-once: X-Wallet-Event-Id is the dedupe key.
-		// Answer fast and do the work elsewhere.
-		go process(event)
+        // Only the signed body identifiers are authoritative.
+        if err := enqueue(event); err != nil {
+            w.WriteHeader(http.StatusServiceUnavailable)
+            return
+        }
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-func process(event walletd.Event) {
-	switch event.Type {
-	case "topup.succeeded":
-		var topup walletd.Topup
-		if err := event.Into("topup", &topup); err != nil { return }
-		credit(topup.UserId, topup.Amount)
-	default:
-		// New types are added without warning. Ignore, do not crash.
-	}
-}
 ```
 
 `VerifySignature` implements `X-Wallet-Signature: t=<unix>,v1=<hex
