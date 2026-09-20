@@ -232,6 +232,13 @@ iterators always send an explicit limit, count distinct cursor keys rather
 than rows, and return `ErrPaginationStalled` rather than looping or stopping
 quietly if the server ever fails to advance the cursor.
 
+`PageSize(n)` is capped at 100, which is the ceiling the service enforces on
+every listing, and a non-positive value selects the default. Asking for more
+than the server will return is the one way to make a full page look like the
+last one, so the cap is applied here rather than left to be discovered. Set it
+before the first `Next`: later changes are ignored, including after a failed
+fetch, so a page already buffered is never judged against a different limit.
+
 Iterators: `Users`, `UserTransactions`, `Transactions`, `Subscriptions`,
 `Orders`, `WebhookDeliveries`, `ExploreClients`, and `ClientOfferings`
 (which follows the envelope's `next_cursor`).

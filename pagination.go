@@ -13,6 +13,13 @@ import (
 // is 100.
 const DefaultPageSize = 100
 
+func boundedPageSize(n int) int {
+	if n < 1 {
+		return DefaultPageSize
+	}
+	return min(n, DefaultPageSize)
+}
+
 // ErrPaginationStalled means the server answered a full page whose last
 // item is the cursor we just sent. Continuing would loop forever and
 // stopping would drop whatever lies past it, so the iterator says so
@@ -46,10 +53,11 @@ type Iterator[T any] struct {
 	limit  int
 	cursor uuid.UUID
 
-	page []T
-	pos  int
-	done bool
-	err  error
+	page    []T
+	pos     int
+	done    bool
+	err     error
+	started bool
 }
 
 func newIterator[T any](
@@ -59,11 +67,12 @@ func newIterator[T any](
 	return &Iterator[T]{fetch: fetch, key: key, limit: DefaultPageSize}
 }
 
-// PageSize asks for pages of n items (1..100). It must be called before the
-// first Next.
+// PageSize selects 1..100 items per page; larger values are capped at 100,
+// and non-positive values select the default. Calls after the first Next
+// are ignored so a buffered page cannot change its termination semantics.
 func (it *Iterator[T]) PageSize(n int) *Iterator[T] {
-	if n > 0 {
-		it.limit = n
+	if !it.started {
+		it.limit = boundedPageSize(n)
 	}
 	return it
 }
@@ -82,6 +91,7 @@ func (it *Iterator[T]) Next(ctx context.Context) bool {
 		return false
 	}
 
+	it.started = true
 	page, err := it.fetch(ctx, it.cursor, it.limit)
 	if err != nil {
 		it.err = err
@@ -153,10 +163,11 @@ type pageIterator[T any] struct {
 	limit  int
 	cursor uuid.UUID
 
-	page []T
-	pos  int
-	done bool
-	err  error
+	page    []T
+	pos     int
+	done    bool
+	err     error
+	started bool
 }
 
 func newPageIterator[T any](fetch func(ctx context.Context, cursor uuid.UUID, limit int) ([]T, *uuid.UUID, error)) *PageIterator[T] {
@@ -166,10 +177,11 @@ func newPageIterator[T any](fetch func(ctx context.Context, cursor uuid.UUID, li
 // PageIterator walks a listing whose responses carry next_cursor.
 type PageIterator[T any] struct{ it pageIterator[T] }
 
-// PageSize asks for pages of n items (1..100), before the first Next.
+// PageSize follows Iterator.PageSize: values are bounded, and calls after
+// the first Next are ignored.
 func (p *PageIterator[T]) PageSize(n int) *PageIterator[T] {
-	if n > 0 {
-		p.it.limit = n
+	if !p.it.started {
+		p.it.limit = boundedPageSize(n)
 	}
 	return p
 }
@@ -188,6 +200,7 @@ func (p *PageIterator[T]) Next(ctx context.Context) bool {
 		return false
 	}
 
+	it.started = true
 	page, next, err := it.fetch(ctx, it.cursor, it.limit)
 	if err != nil {
 		it.err = err
