@@ -1,0 +1,23 @@
+networks:
+  default:
+    name: walletd_acceptance_default
+    external: false
+services:
+  walletd:
+    ports: !override ["127.0.0.1:28080:8080"]
+    environment:
+      WALLETD_MOCK_GATEWAY: "true"
+      WALLETD_STRIPE_SECRET_KEY: ""
+      WALLETD_STRIPE_WEBHOOK_SECRET: ""
+      WALLETD_POSTAL_API_KEY: ""
+      WALLETD_FIREBASE_CREDENTIALS: ""
+  authsvc:
+    ports: !override ["127.0.0.1:28081:8081"]
+  postgres:
+    ports: !reset []
+  ledgerd:
+    ports: !reset []
+  minio:
+    ports: !reset []
+  mailpit:
+    ports: !reset []
