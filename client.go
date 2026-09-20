@@ -18,7 +18,7 @@ import (
 
 const (
 	// Version is this SDK's version.
-	Version = "0.1.0"
+	Version = "0.1.2"
 	// APIVersion is the version of the WalletD contract types.gen.go was
 	// generated from. A server on a different minor version may return
 	// fields this SDK does not know; it will never return a field shape

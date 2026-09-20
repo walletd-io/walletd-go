@@ -92,7 +92,7 @@ func TestResponseReadFailuresAndDecodeErrors(t *testing.T) {
 			calls := 0
 			c := responseClient(t, func(r *http.Request) (*http.Response, error) {
 				calls++
-				var body io.ReadCloser = io.NopCloser(strings.NewReader(tc.body))
+				body := io.NopCloser(strings.NewReader(tc.body))
 				if tc.readErr != nil {
 					b := failedBody{err: tc.readErr}
 					if tc.cancel {
@@ -127,7 +127,7 @@ func TestRedirectsAreRefused(t *testing.T) {
 						w.Header().Set("Location", location)
 					}
 					w.WriteHeader(status)
-					io.WriteString(w, `{}`)
+					_, _ = io.WriteString(w, `{}`)
 				}))
 				defer srv.Close()
 				for _, custom := range []bool{false, true} {

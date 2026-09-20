@@ -258,7 +258,7 @@ with `WithHTTPClient`: the SDK copies the supplied client and replaces its
 `CheckRedirect` policy without mutating the original. Point the SDK directly at
 the API host. Unexpected non-2xx statuses outside 4xx/5xx match
 `ErrUnexpectedStatus`; a redirect cannot silently replay a write or turn it into
-GET. These are local, unreleased changes until an SDK version is published.
+GET. These response and webhook validation changes are included in v0.1.2.
 
 ## Webhooks
 
